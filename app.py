@@ -8,7 +8,7 @@ import google.generativeai as genai
 import requests
 import feedparser
 import streamlit.components.v1 as components
-import time, io, random, csv, base64, json
+import time, io, random, csv
 
 # ---------- 初始化 ----------
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -83,45 +83,6 @@ def plot_monthly(name, ticker, tz_name):
         ax.set_title(f"{name} (1M)", fontsize=8)
         st.pyplot(fig)
 
-# ---------- URL 持久化工具 ----------
-def save_state_to_url():
-    """将当前状态编码到 URL 中，实现永久保存"""
-    state = {
-        "template": st.session_state.get("activity_template", []),
-        "budgets": st.session_state.get("budgets", {}),
-        "df_hist": st.session_state.get("df_hist", pd.DataFrame()).to_dict(orient="records") if not st.session_state.get("df_hist", pd.DataFrame()).empty else []
-    }
-    # 将日期转换为字符串以便 JSON 序列化
-    for record in state["df_hist"]:
-        if isinstance(record.get("date"), date):
-            record["date"] = record["date"].isoformat()
-    json_str = json.dumps(state)
-    encoded = base64.urlsafe_b64encode(json_str.encode()).decode()
-    st.query_params["data"] = encoded
-
-def load_state_from_url():
-    """从 URL 参数中恢复状态"""
-    encoded = st.query_params.get("data")
-    if encoded:
-        try:
-            json_str = base64.urlsafe_b64decode(encoded.encode()).decode()
-            state = json.loads(json_str)
-            # 恢复模板
-            if state.get("template"):
-                st.session_state["activity_template"] = state["template"]
-            if state.get("budgets"):
-                st.session_state["budgets"] = state["budgets"]
-            # 恢复历史记录
-            if state.get("df_hist"):
-                df = pd.DataFrame(state["df_hist"])
-                if not df.empty:
-                    df["date"] = pd.to_datetime(df["date"]).dt.date
-                st.session_state["df_hist"] = df
-            return True
-        except:
-            pass
-    return False
-
 # ---------- 任务选择 ----------
 task = st.sidebar.selectbox(
     "Choose a task",
@@ -137,29 +98,295 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
-    # （Task 1 代码保持不变，请直接粘贴你之前稳定运行的版本）
-    # 为节省篇幅，此处省略，实际使用时需保留原有代码
-    pass
+    st.subheader("📰 Today’s German Learning Sentence")
+    st.caption("Based on a real news headline from BBC")
+    bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
+    news_title = ""
+    news_link = ""
+    try:
+        feed = feedparser.parse(bbc_rss)
+        if feed.entries:
+            chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
+            news_title = chosen.title
+            news_link = chosen.link
+    except:
+        news_title = "Unable to fetch news"
+        news_link = ""
+
+    if news_title:
+        st.markdown(f"**📌 Today's headline:** {news_title}")
+        if news_link:
+            st.markdown(f"[🔗 Read full article]({news_link})")
+    else:
+        st.warning("Could not fetch latest news. Using generic prompt.")
+
+    if st.button("Generate Sentence"):
+        with st.spinner("Generating..."):
+            prompt = (
+                f"Today is {today_date}. The reference news headline is: '{news_title}'. "
+                "Based on this exact news topic, generate: "
+                "1) A single German sentence at A2 level. "
+                "2) Its accurate English translation. "
+                "3) 3-5 key German words from the sentence, each with its English meaning and a short example phrase. Format as 'Word (part of speech): meaning | Example: ...' "
+                "4) One brief grammar explanation (in English). "
+                "Format exactly:\n"
+                "German: <sentence>\n"
+                "English: <translation>\n"
+                "Vocabulary:\n"
+                "- <Word1 (pos)>: <meaning> | Example: <example>\n"
+                "- ...\n"
+                "Grammar: <explanation>"
+            )
+            try:
+                response = model.generate_content(prompt)
+                text = response.text
+                lines = text.split("\n")
+                german = english = grammar = ""
+                vocab = []
+                mode = None
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("German:"):
+                        german = line.replace("German:", "").strip()
+                    elif line.startswith("English:"):
+                        english = line.replace("English:", "").strip()
+                    elif line.startswith("Grammar:"):
+                        grammar = line.replace("Grammar:", "").strip()
+                    elif line.startswith("Vocabulary:"):
+                        mode = "vocab"
+                    elif mode == "vocab" and line.startswith("-"):
+                        vocab.append(line.lstrip("- ").strip())
+                if german:
+                    st.success(f"**🇩🇪 German:** {german}")
+                    tts_html = f"""
+                    <div style="margin-top:8px;">
+                        <button onclick="speak()" style="padding:6px 12px; font-size:14px;">🔊 Listen</button>
+                    </div>
+                    <script>
+                    function speak() {{
+                        var msg = new SpeechSynthesisUtterance();
+                        msg.text = `{german}`;
+                        msg.lang = 'de-DE';
+                        msg.rate = 0.9;
+                        window.speechSynthesis.speak(msg);
+                    }}
+                    </script>
+                    """
+                    components.html(tts_html, height=60)
+                if english:
+                    st.info(f"**🇬🇧 English:** {english}")
+                if vocab:
+                    st.markdown("**📖 Key Vocabulary:**")
+                    for v in vocab:
+                        st.markdown(f"- {v}")
+                if grammar:
+                    st.markdown(f"**📐 Grammar Note:** {grammar}")
+            except Exception as e:
+                st.error(f"API error: {e}")
+    else:
+        st.info("Click the button to generate a sentence based on today’s news.")
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
-    # （Task 2 代码保持不变）
-    pass
+    st.subheader("📈 Major Stock Indices")
+    st.caption(f"Latest data as of {today_date}")
+
+    stocks = {
+        "A-Share": {"SSE Composite": "000001.SS", "Shenzhen Index": "399001.SZ"},
+        "HK": {"Hang Seng": "^HSI"},
+        "US": {"NASDAQ": "^IXIC", "S&P 1500": "^SP1500", "Dow Jones": "^DJI"}
+    }
+
+    if st.button("Fetch Real-time Data"):
+        rows = []
+        for region, names in stocks.items():
+            for name, ticker in names.items():
+                try:
+                    info = yf.Ticker(ticker).history(period="1d", interval="5m")
+                    if not info.empty:
+                        last = info['Close'].iloc[-1]
+                        open_price = info['Open'].iloc[0]
+                        change = (last - open_price) / open_price * 100
+                        sign = "+" if change >= 0 else ""
+                        color = "red" if change >= 0 else "green"
+                        rows.append((name, f"{last:.2f}", f"{sign}{change:.2f}%", color))
+                    else:
+                        rows.append((name, "N/A", "-", "gray"))
+                except:
+                    rows.append((name, "Error", "-", "gray"))
+
+        html = "<table style='width:100%; border-collapse: collapse;'>"
+        html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
+        for name, price, chg, color in rows:
+            html += f"<tr><td>{name}</td><td>{price}</td><td style='color:{color}; font-weight:bold;'>{chg}</td></tr>"
+        html += "</table>"
+        st.markdown(html, unsafe_allow_html=True)
+
+        col_left, col_right = st.columns([1, 1])
+        with col_left:
+            st.markdown("**🇨🇳 A-Share / HK (Beijing Time)**")
+            plot_intraday("SSE Composite", "000001.SS", "Asia/Shanghai")
+            plot_intraday("Shenzhen Index", "399001.SZ", "Asia/Shanghai")
+            plot_intraday("Hang Seng", "^HSI", "Asia/Shanghai")
+        with col_right:
+            st.markdown("**🇺🇸 US Market (New York Time)**")
+            plot_intraday("NASDAQ", "^IXIC", "America/New_York")
+            plot_intraday("S&P 1500", "^SP1500", "America/New_York")
+            plot_intraday("Dow Jones", "^DJI", "America/New_York")
+
+        st.markdown("**📅 1-Month Trend**")
+        col_trend_left, col_trend_right = st.columns([1, 1])
+        with col_trend_left:
+            plot_monthly("SSE Composite", "000001.SS", "Asia/Shanghai")
+            plot_monthly("Shenzhen Index", "399001.SZ", "Asia/Shanghai")
+            plot_monthly("Hang Seng", "^HSI", "Asia/Shanghai")
+        with col_trend_right:
+            plot_monthly("NASDAQ", "^IXIC", "America/New_York")
+            plot_monthly("S&P 1500", "^SP1500", "America/New_York")
+            plot_monthly("Dow Jones", "^DJI", "America/New_York")
+    else:
+        st.info("Click to fetch real-time stock data.")
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
-    # （Task 3 代码保持不变）
-    pass
+    st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
+    rss_urls = [
+        ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
+        ("Retraction Watch", "https://retractionwatch.com/feed/"),
+        ("STM Association", "https://www.stm-assoc.org/feed/"),
+        ("ALPSP", "https://www.alpsp.org/feed/"),
+        ("COPE", "https://publicationethics.org/feed/"),
+        ("SSP", "https://www.sspnet.org/feed/"),
+    ]
+    if st.button("Summarize Latest News"):
+        with st.spinner("Fetching..."):
+            entries = []
+            for src_name, url in rss_urls:
+                try:
+                    feed = feedparser.parse(url)
+                    for entry in feed.entries[:2]:
+                        entries.append((src_name, entry.title, entry.link, entry.get("published","")))
+                except:
+                    continue
+            if entries:
+                combined_lines = []
+                for src, title, link, pub in entries:
+                    combined_lines.append(f"Source: {src} | Title: {title} | Link: {link} | Date: {pub}")
+                combined = "\n".join(combined_lines)
+                prompt = (
+                    f"Today is {today_date}. Below are recent STM publishing news headlines from the last week. "
+                    "Write a concise summary in 3-4 bullet points. For each bullet, include the key point and cite the source name. "
+                    "Do not invent any information.\n\n{combined}"
+                )
+                try:
+                    resp = model.generate_content(prompt)
+                    st.markdown(resp.text)
+                    with st.expander("View all sources"):
+                        for src, title, link, pub in entries:
+                            st.markdown(f"- **{src}**: [{title}]({link}) ({pub})")
+                except Exception as e:
+                    st.error(f"Gemini error: {e}")
+            else:
+                st.warning("Could not fetch any RSS feeds.")
+    else:
+        st.info("Click to generate summary.")
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
-    # （Task 4 代码保持不变）
-    pass
+    st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
+    domain_rss = {
+        "AGI / Artificial General Intelligence": [
+            ("Synced Review", "https://syncedreview.com/feed/"),
+            ("AI News", "https://www.artificialintelligence-news.com/feed/"),
+        ],
+        "Global Order Restructuring": [
+            ("Reuters World", "https://www.reuters.com/world/rss"),
+            ("CFR", "https://www.cfr.org/feed"),
+        ],
+        "Space Exploration": [
+            ("SpaceNews", "https://spacenews.com/feed/"),
+            ("NASA", "https://www.nasa.gov/feed/"),
+        ],
+        "Controlled Nuclear Fusion": [
+            ("World Nuclear News", "https://www.world-nuclear-news.org/feed"),
+            ("ScienceDaily Nuclear", "https://www.sciencedaily.com/rss/matter_energy/nuclear_energy.xml"),
+        ],
+        "Life Science / Anti-Aging + BCI": [
+            ("STAT News", "https://www.statnews.com/feed/"),
+            ("Fierce Biotech", "https://www.fiercebiotech.com/feed"),
+        ],
+    }
+    if st.button("Get Latest Milestones"):
+        with st.spinner("Aggregating..."):
+            all_domain_news = {}
+            for domain, feeds in domain_rss.items():
+                headlines = []
+                for src_name, url in feeds:
+                    try:
+                        feed = feedparser.parse(url)
+                        for entry in feed.entries[:2]:
+                            headlines.append((src_name, entry.title, entry.link, entry.get("published","")))
+                    except:
+                        continue
+                if headlines:
+                    all_domain_news[domain] = headlines
+            if not all_domain_news:
+                st.warning("No RSS feeds could be retrieved.")
+            else:
+                combined_for_prompt = []
+                for domain, items in all_domain_news.items():
+                    combined_for_prompt.append(f"**{domain}**")
+                    for src, title, link, pub in items:
+                        combined_for_prompt.append(f"- {src}: {title} ({pub}) Link: {link}")
+                input_text = "\n".join(combined_for_prompt)
+                prompt = (
+                    f"Today is {today_date}. Below are headlines from the last 7 days for five specific frontier areas. "
+                    "For each area, present 1-2 most important milestones in bullet points. Include the date and source. "
+                    "DO NOT fabricate.\n\n{input_text}"
+                )
+                try:
+                    resp = model.generate_content(prompt)
+                    st.markdown(resp.text)
+                    with st.expander("View all raw headlines"):
+                        for domain, items in all_domain_news.items():
+                            st.markdown(f"**{domain}**")
+                            for src, title, link, pub in items:
+                                st.markdown(f"- [{title}]({link}) ({src}, {pub})")
+                except Exception as e:
+                    st.error(f"Gemini error: {e}")
+    else:
+        st.info("Click to get frontier updates.")
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
-    # （Task 5 代码保持不变）
-    pass
+    st.subheader("💡 Tech Trends & Podcast Recommendation")
+    st.caption("Based on Product Hunt trending products")
+    ph_rss = "https://www.producthunt.com/feed"
+    podcast_names = ["The a16z Show", "Exponential View", "Hard Fork", "Latent Space", "No Priors AI"]
+    if st.button("Analyze & Recommend"):
+        with st.spinner("Analyzing..."):
+            ph_entries = []
+            try:
+                feed = feedparser.parse(ph_rss)
+                for entry in feed.entries[:5]:
+                    ph_entries.append(f"{entry.title} – {entry.link}")
+            except:
+                pass
+            ph_text = "\n".join(ph_entries) if ph_entries else "Product Hunt data unavailable."
+            prompt = (
+                f"Today is {today_date}. Based on the following Product Hunt trending products, identify the top 2-3 tech/AI trends this week. "
+                "Present as bullet points. Then, choose one podcast from this list: The a16z Show, Exponential View, Hard Fork, Latent Space, No Priors AI "
+                "that best matches the current trend. Explain your choice in one sentence. "
+                "IMPORTANT: Do not fabricate episode names or links. If you cannot verify, say 'I recommend checking the latest episode of [Podcast]' without a link.\n\n"
+                f"Product Hunt:\n{ph_text}"
+            )
+            try:
+                resp = model.generate_content(prompt)
+                st.markdown(resp.text)
+            except Exception as e:
+                st.error(f"API error: {e}")
+    else:
+        st.info("Click to get trend analysis and podcast recommendation.")
 
 # ==================== TASK 6 ====================
 elif task.startswith("Task 6"):
@@ -251,18 +478,13 @@ Jan	8	X		X	X	X		X	X																					X	X		X
 Jan	9	X	X	X	X			X	X						X											X		X					
 Jan	10	X		X				X	X	X					X											X	X						X"""
 
-    # 初始化 session_state（优先从 URL 恢复）
+    # 初始化 session_state
     if "activity_template" not in st.session_state:
         st.session_state["activity_template"] = []
     if "budgets" not in st.session_state:
         st.session_state["budgets"] = {}
     if "df_hist" not in st.session_state:
         st.session_state["df_hist"] = pd.DataFrame()
-
-    # 尝试从 URL 恢复数据
-    url_loaded = load_state_from_url()
-    if url_loaded:
-        st.sidebar.success("✅ Data loaded from saved link.")
 
     # 上传模板 CSV
     uploaded = st.file_uploader("Upload activity tracker CSV (template)", type="csv")
@@ -276,9 +498,8 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
         if not df_hist.empty:
             df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
         st.session_state["df_hist"] = df_hist
-        save_state_to_url()
-        st.success("New template loaded and saved to URL.")
-    elif not st.session_state["activity_template"] and not url_loaded:
+        st.success("New template loaded. Previous activity data replaced.")
+    elif not st.session_state["activity_template"]:
         # 首次加载演示数据
         template, budgets, hist = load_template_and_history(sample_csv)
         st.session_state["activity_template"] = template
@@ -288,15 +509,14 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
         if not df_hist.empty:
             df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
         st.session_state["df_hist"] = df_hist
-        save_state_to_url()
-        st.info("Using built-in demo template. Your progress is automatically saved in the link.")
+        st.info("Using built-in demo template. Upload your own CSV to replace it.")
 
-    # 确保从 session_state 取最新数据
+    # 获取最新状态
     activity_template = st.session_state["activity_template"]
     budgets = st.session_state["budgets"]
     df_hist = st.session_state["df_hist"]
 
-    # 构建活动列表（实时使用最新 budget）
+    # 构建活动列表（实时反映 budget 修改）
     activities = []
     for t in activity_template:
         name = t["name"]
@@ -314,8 +534,10 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
             backup_csv,
             file_name=f"activity_backup_{date.today()}.csv"
         )
+        st.sidebar.caption("Save this file to restore your progress later.")
     else:
         st.sidebar.info("No data to back up yet.")
+
     backup_file = st.sidebar.file_uploader("Restore from backup CSV", type="csv", key="restore")
     if backup_file is not None:
         try:
@@ -323,8 +545,8 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
             if {"date","activity","category","achieved","budget"}.issubset(restored.columns):
                 restored["date"] = pd.to_datetime(restored["date"]).dt.date
                 st.session_state["df_hist"] = restored
-                save_state_to_url()
-                st.success("Backup restored! Data saved to URL.")
+                # 备份中可能不包含 budget 的最新修改，因此保留 budgets 不变
+                st.success("Backup restored! Your progress is back.")
                 st.rerun()
             else:
                 st.sidebar.error("Invalid backup format.")
@@ -366,8 +588,7 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
         df_hist = pd.concat([df_hist, df_new], ignore_index=True)
         df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
         st.session_state["df_hist"] = df_hist
-        save_state_to_url()
-        st.success("Check-in saved! Your progress is now in the URL (bookmark this page).")
+        st.success("Check-in saved!")
         st.rerun()
 
     # ---------- YTD 进度 ----------
@@ -451,7 +672,6 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 mask = df_hist["activity"] == selected_activity
                 df_hist.loc[mask, "budget"] = float(new_budget)
                 st.session_state["df_hist"] = df_hist
-            save_state_to_url()
             st.success(f"Budget updated to {new_budget}.")
             st.rerun()
 
