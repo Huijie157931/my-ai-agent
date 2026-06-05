@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo  # Python 3.9+ 内置，无需安装
 import yfinance as yf
 import google.generativeai as genai
 import requests
@@ -20,15 +19,30 @@ st.title("🤖 Personal AI Assistant – Full Demo")
 today_date = date.today().strftime("%B %d, %Y")
 st.caption(f"📅 {today_date}")
 
-# ---------- 辅助绘图函数（时区转换）----------
+# ---------- 辅助绘图函数（时区安全）----------
+def safe_tz_convert(df, tz_name):
+    """安全转换 yfinance DataFrame 的时区"""
+    if df.empty:
+        return df
+    # 如果索引已有时区，直接转换；否则先本地化为 UTC
+    if df.index.tz is None:
+        df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
+    else:
+        df.index = df.index.tz_convert(tz_name)
+    return df
+
 def plot_intraday(name, ticker, tz_name):
-    """绘制当日分时图，时间转换为指定时区"""
+    """绘制当日分时图"""
     try:
         df = yf.Ticker(ticker).history(period="1d", interval="5m")
-        if df.empty:
+        if df.empty or len(df) < 2:
+            # 数据不足，显示占位图
+            fig, ax = plt.subplots(figsize=(3.5, 1.8))
+            ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
+            ax.set_title(f"{name} (Real-Time)", fontsize=8)
+            st.pyplot(fig)
             return
-        # yfinance 返回的 index 没有时区，实际为 UTC，先本地化
-        df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
+        df = safe_tz_convert(df, tz_name)
         open_price = df['Open'].iloc[0]
         last_price = df['Close'].iloc[-1]
         change = (last_price - open_price) / open_price * 100
@@ -41,15 +55,23 @@ def plot_intraday(name, ticker, tz_name):
         plt.yticks(fontsize=6)
         st.pyplot(fig)
     except Exception:
-        pass
+        # 出错时也显示占位图
+        fig, ax = plt.subplots(figsize=(3.5, 1.8))
+        ax.text(0.5, 0.5, 'Error loading data', ha='center', va='center', fontsize=8)
+        ax.set_title(f"{name} (Real-Time)", fontsize=8)
+        st.pyplot(fig)
 
 def plot_monthly(name, ticker, tz_name):
-    """绘制一个月趋势图，时间转换为指定时区"""
+    """绘制一个月趋势图"""
     try:
         df = yf.Ticker(ticker).history(period="1mo")
-        if df.empty:
+        if df.empty or len(df) < 2:
+            fig, ax = plt.subplots(figsize=(3.5, 1.8))
+            ax.text(0.5, 0.5, 'Not enough monthly data', ha='center', va='center', fontsize=8)
+            ax.set_title(f"{name} (1M)", fontsize=8)
+            st.pyplot(fig)
             return
-        df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
+        df = safe_tz_convert(df, tz_name)
         start_price = df['Close'].iloc[0]
         end_price = df['Close'].iloc[-1]
         change = (end_price - start_price) / start_price * 100
@@ -62,7 +84,10 @@ def plot_monthly(name, ticker, tz_name):
         plt.yticks(fontsize=6)
         st.pyplot(fig)
     except Exception:
-        pass
+        fig, ax = plt.subplots(figsize=(3.5, 1.8))
+        ax.text(0.5, 0.5, 'Error loading data', ha='center', va='center', fontsize=8)
+        ax.set_title(f"{name} (1M)", fontsize=8)
+        st.pyplot(fig)
 
 # ---------- 任务选择 ----------
 task = st.sidebar.selectbox(
@@ -79,6 +104,7 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
+    # ... 保持原有 Task 1 代码不变 ...
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -233,6 +259,7 @@ elif task.startswith("Task 2"):
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
+    # ... 保持原有 Task 3 代码不变 ...
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
         ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
@@ -277,6 +304,7 @@ elif task.startswith("Task 3"):
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
+    # ... 保持原有 Task 4 代码不变 ...
     st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
     domain_rss = {
         "AGI / Artificial General Intelligence": [
@@ -343,6 +371,7 @@ elif task.startswith("Task 4"):
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
+    # ... 保持原有 Task 5 代码不变 ...
     st.subheader("💡 Tech Trends & Podcast Recommendation")
     st.caption("Based on Product Hunt trending products")
     ph_rss = "https://www.producthunt.com/feed"
@@ -377,6 +406,7 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption(f"{today_date}")
 
+    # ---------- 样本 CSV ----------
     sample_csv = """Month	Day	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Weekly	Weekly	Weekly	Weekly	Monthly	Monthly	Monthly	Monthly	Monthly	Quartely	Quartely	Annual	Annual	Annual	Annual	Annual	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap
 MEVB Category		B	B	B	B	M	M	V	V	V	M	M	B	V	M	M	E	E	V	M	V	V	E	B	B	E	V	E	E	E	M	M	V
 Activity		Food & Water & Self care	Energy, Focus and Emotion	Basic Exercise	Foot step	>.5hour MAG	>.5hour books	Meditation	Sketch	Life Admin	Learn sth new	Movie	Extra Exercise	Monthly review	Invest	Play/Exhibits/lecture	Meet new people	Deep exposure to nature	Quarterly Review 	CV & Jobs	Yearly Review + Plan 	Annual leave	Family Gathering	Health Check	Extensive Journey (km)	People	Give back	Engage. Get buy in. Inspire.	Seek for help	Confident & Brave	Storytelling/talkative	AI	Growth Mindset
@@ -394,11 +424,17 @@ Jan	8	X		X	X	X		X	X																					X	X		X
 Jan	9	X	X	X	X			X	X						X											X		X					
 Jan	10	X		X				X	X	X					X											X	X						X"""
 
-    # 上传 CSV
+    # ---------- 文件上传 ----------
     uploaded = st.file_uploader("Upload your activity tracker CSV", type="csv")
     if uploaded is not None:
         raw = uploaded.read().decode("utf-8")
         st.session_state["raw_csv"] = raw
+        # 上传新文件后，清除旧的历史记录，强制重新解析
+        if "df_hist" in st.session_state:
+            del st.session_state["df_hist"]
+        if "budgets" in st.session_state:
+            del st.session_state["budgets"]   # 清除已修改的 budget，以新上传文件的 budget 为准
+        st.success("CSV uploaded. Data refreshed.")
     elif "raw_csv" not in st.session_state:
         st.session_state["raw_csv"] = sample_csv
         st.info("Using built-in demo data. Upload your own CSV to replace it.")
@@ -415,24 +451,31 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
     act_line = lines[2].split(sep)
     budget_line = lines[3].split(sep) if len(lines) > 3 else []
 
+    # 解析活动列表，优先使用已修改的 budgets
+    if "budgets" not in st.session_state:
+        st.session_state["budgets"] = {}
     activities = []
     for i in range(2, len(act_line)):
         if i < len(cat_line) and cat_line[i].strip() in ("B","V","M","E"):
             name = act_line[i].strip()
             cat = cat_line[i].strip()
-            budget = 0
-            if i < len(budget_line):
+            # 如果用户修改过该活动的 budget，则使用修改后的值
+            if name in st.session_state["budgets"]:
+                budget = st.session_state["budgets"][name]
+            else:
                 try:
                     budget = float(budget_line[i].strip())
                 except:
-                    pass
+                    budget = 0
+                # 初次加载时保存到 state
+                st.session_state["budgets"][name] = budget
             activities.append({"name": name, "category": cat, "budget": budget})
 
     if not activities:
         st.error("No activities parsed.")
         st.stop()
 
-    # 初始化或读取历史记录到 session_state
+    # ---------- 初始化历史记录（只在 session_state 中没有时从 CSV 解析）----------
     if "df_hist" not in st.session_state:
         records = []
         for row_idx in range(5, len(lines)):
@@ -475,7 +518,7 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
 
     df_hist = st.session_state["df_hist"]
 
-    # ----- 1. 打卡日历 -----
+    # ---------- 1. 打卡日历 ----------
     st.markdown("### 📅 Select Date for Check-in")
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
@@ -513,7 +556,7 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
         st.success("Check-in saved!")
         st.rerun()
 
-    # ----- 2. YTD Progress (百分比，颜色) -----
+    # ---------- 2. YTD Progress ----------
     st.markdown("### 📊 Year-to-Date Progress")
     if not df_hist.empty:
         ytd = df_hist[df_hist["date"].apply(lambda x: x.year == date.today().year)]
@@ -535,15 +578,14 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 progress_rows.append({
                     "Category": act["category"],
                     "Activity": name,
-                    "Annual Target": budget,
-                    "Actual YTD": actual,
-                    "Expected YTD": expected,
+                    "Annual Target": int(round(budget)),
+                    "Actual YTD": int(round(actual)),
+                    "Expected YTD": int(round(expected)),
                     "Progress %": f"{actual_ratio:.1%}",
                     "Status": status
                 })
             df_progress = pd.DataFrame(progress_rows)
 
-            # 样式函数：返回颜色 CSS
             def status_color(val):
                 if val == "On Track":
                     return "background-color: #d4edda; color: #155724"
@@ -552,7 +594,6 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 else:
                     return "background-color: #f8d7da; color: #721c24"
 
-            # 使用 map 替代 applymap
             styled = df_progress.style.map(status_color, subset=["Status"])
             st.dataframe(styled, use_container_width=True)
 
@@ -568,9 +609,9 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                     cat_status = "On Track" if total_actual >= expected_cat else "Behind"
                     cat_summary.append({
                         "Category": cat,
-                        "Total Target": total_budget,
-                        "Actual": total_actual,
-                        "Expected": round(expected_cat, 1),
+                        "Total Target": int(round(total_budget)),
+                        "Actual": int(round(total_actual)),
+                        "Expected": int(round(expected_cat)),
                         "Progress %": f"{total_actual / total_budget:.1%}" if total_budget > 0 else "0%",
                         "Status": cat_status
                     })
@@ -585,30 +626,42 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
     else:
         st.info("No activity data loaded.")
 
-    # ----- 3. 编辑 Budget (下拉菜单) -----
+    # ---------- 3. 编辑 Budget ----------
     st.markdown("### ✏️ Edit Annual Budget")
     selected_activity = st.selectbox("Select activity to modify:", [a["name"] for a in activities])
     current_budget = next(a["budget"] for a in activities if a["name"] == selected_activity)
     new_budget = st.number_input(f"New budget for {selected_activity}", value=int(current_budget), min_value=0)
     if st.button("Update Budget"):
+        # 更新持久化字典
+        st.session_state["budgets"][selected_activity] = float(new_budget)
+        # 更新 activities 列表中的值
         for a in activities:
             if a["name"] == selected_activity:
-                a["budget"] = new_budget
+                a["budget"] = float(new_budget)
                 break
+        # 更新 df_hist 中对应活动的 budget（可选，主要用于导出，但 YTD 计算用的是 activities 的 budget）
         if not df_hist.empty:
             mask = df_hist["activity"] == selected_activity
-            df_hist.loc[mask, "budget"] = new_budget
+            df_hist.loc[mask, "budget"] = float(new_budget)
             st.session_state["df_hist"] = df_hist
         st.success(f"Budget for '{selected_activity}' updated to {new_budget}.")
         st.rerun()
 
-    # ----- 4. 导出 CSV -----
+    # ---------- 4. 导出 CSV（宽表格式）----------
     st.markdown("### 📥 Export Data")
-    csv_buffer = io.StringIO()
     if not df_hist.empty:
-        df_hist.to_csv(csv_buffer, index=False)
+        # 构建宽表：日期为索引，活动为列
+        wide_df = df_hist.pivot_table(index='date', columns='activity', values='achieved', aggfunc='sum')
+        # 为了与原始格式类似，可以添加 Month 和 Day 列，这里简单保留日期即可
+        # 重置索引，让日期成为一列
+        wide_df = wide_df.reset_index()
+        # 按日期排序
+        wide_df = wide_df.sort_values('date')
+        # 转换为 CSV 字符串
+        csv_buffer = io.StringIO()
+        wide_df.to_csv(csv_buffer, index=False)
         st.download_button(
-            label="Download activity log as CSV",
+            label="Download activity log as CSV (wide format)",
             data=csv_buffer.getvalue(),
             file_name=f"activity_log_{date.today()}.csv",
             mime="text/csv"
