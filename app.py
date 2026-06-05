@@ -393,8 +393,9 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption(f"{today_date}")
 
-    # ---------- 辅助：加载模板 + 历史数据 ----------
-    def load_template_and_history(raw_csv):
+    # ---------- 工具函数 ----------
+    def parse_template_and_history(raw_csv):
+        """从 CSV 字符串解析出 activity_template, budgets, df_hist (宽表历史数据)"""
         try:
             sniffer = csv.Sniffer()
             dialect = sniffer.sniff(raw_csv[:1024])
@@ -402,15 +403,22 @@ elif task.startswith("Task 6"):
         except:
             reader = csv.reader(raw_csv.splitlines(), delimiter='\t')
         lines = list(reader)
-        if len(lines) < 4:
-            return [], {}, []
+        if len(lines) < 7:
+            return [], {}, pd.DataFrame()
+
+        # 第二行类别
         cat_line = lines[1]
+        # 第三行活动名
         act_line = lines[2]
+        # 第四行预算
         budget_line = lines[3] if len(lines) > 3 else []
+        # 第五行 YTD, 第六行 vs YTD 可忽略
+
         template = []
         budgets = {}
-        start = next((i for i, c in enumerate(cat_line) if c.strip() in ("B","V","M","E")), 2)
-        for i in range(start, len(act_line)):
+        # 找到第一个类别为 B/V/M/E 的列作为起始
+        start_col = next((i for i, c in enumerate(cat_line) if c.strip() in ("B","V","M","E")), 2)
+        for i in range(start_col, len(act_line)):
             cat = cat_line[i].strip() if i < len(cat_line) else ""
             if cat in ("B","V","M","E"):
                 name = act_line[i].strip()
@@ -423,9 +431,9 @@ elif task.startswith("Task 6"):
                 template.append({"name": name, "category": cat})
                 budgets[name] = budget
 
-        # 解析历史数据
+        # 解析历史数据（第6行开始，即索引5）
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
-        history = []
+        records = []
         for row in lines[5:]:
             if not row or len(row) < 3:
                 continue
@@ -442,7 +450,7 @@ elif task.startswith("Task 6"):
                 continue
             record_date = date(date.today().year, month, day)
             for idx, act in enumerate(template):
-                col_idx = start + idx
+                col_idx = start_col + idx
                 if col_idx < len(row):
                     val = row[col_idx].strip()
                     if val.upper() == "X":
@@ -451,16 +459,110 @@ elif task.startswith("Task 6"):
                         achieved = float(val)
                     else:
                         achieved = 0.0
-                    history.append({
+                    records.append({
                         "date": record_date,
                         "activity": act["name"],
                         "category": act["category"],
                         "achieved": achieved,
                         "budget": budgets[act["name"]]
                     })
-        return template, budgets, history
+        df_hist = pd.DataFrame(records)
+        if not df_hist.empty:
+            df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
+        return template, budgets, df_hist
 
-    # 内置演示数据
+    def build_activities():
+        """基于当前 template 和 budgets 构建 activities 列表"""
+        template = st.session_state.get("activity_template", [])
+        budgets = st.session_state.get("budgets", {})
+        return [{"name": t["name"], "category": t["category"], "budget": budgets.get(t["name"], 0)} for t in template]
+
+    def save_checkin(selected_date, updated_entries):
+        """保存打卡记录并强制更新 session_state"""
+        df_hist = st.session_state.get("df_hist", pd.DataFrame())
+        # 删除该日期旧记录
+        df_hist = df_hist[df_hist["date"] != selected_date] if not df_hist.empty else df_hist
+        # 添加新记录
+        new_rows = []
+        for act in build_activities():
+            new_rows.append({
+                "date": selected_date,
+                "activity": act["name"],
+                "category": act["category"],
+                "achieved": updated_entries[act["name"]],
+                "budget": act["budget"]
+            })
+        df_new = pd.DataFrame(new_rows)
+        df_hist = pd.concat([df_hist, df_new], ignore_index=True)
+        df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
+        st.session_state["df_hist"] = df_hist
+
+    def export_template_csv():
+        """导出与原始模板格式一致的 CSV（含活动定义 + 当前所有历史数据）"""
+        template = st.session_state.get("activity_template", [])
+        budgets = st.session_state.get("budgets", {})
+        df_hist = st.session_state.get("df_hist", pd.DataFrame())
+        if not template:
+            return ""
+        # 构建活动列表（保持顺序）
+        act_names = [t["name"] for t in template]
+        # 构建表头
+        header1 = ["Month", "Day"] + [""] + [""] * (len(act_names)-1)  # 简单处理，实际第一行可能更复杂，我们只生成必要部分
+        # 但为了兼容，我们按原格式：第一行 Month, Day, 然后空一列，再重复写 Daily, Weekly 等（简化，直接写空）
+        # 实际上只要保证类别行和活动行对齐即可。
+        # 简化：生成三行头
+        line1 = ["Month", "Day"] + act_names
+        # 第二行：类别
+        line2 = ["", ""] + [t["category"] for t in template]
+        # 第三行：活动名称（重复，但 line1 也是活动名称，这里我们让 line1 也作为活动名，第二行是类别）
+        # 更稳妥：第一行 Month, Day, 以及活动名（但我们把活动名放在第三行）
+        # 调整策略：
+        header_month_day = ["Month", "Day"]
+        # 真正的类别行 (MEVB Category)
+        mevb_row = ["MEVB Category", ""] + [t["category"] for t in template]
+        # 活动名行 (Activity)
+        activity_row = ["Activity", ""] + [t["name"] for t in template]
+        # 预算行 (BUDGET)
+        budget_row = ["BUDGET", ""] + [str(int(budgets.get(t["name"], 0))) for t in template]
+        # YTD 行和 vs YTD 行可省略（恢复时不读）
+
+        # 历史数据行：按日期排序，输出宽表
+        if not df_hist.empty:
+            # 转换为宽表：行为日期，列为活动
+            pivoted = df_hist.pivot_table(index='date', columns='activity', values='achieved', aggfunc='sum', fill_value=0)
+            pivoted = pivoted[act_names]  # 确保列顺序一致
+            # 将浮点数转为整数 X 或保留数字（如果是步数等）
+            def fmt_val(v):
+                if v == 1:
+                    return "X"
+                elif v == 0:
+                    return ""
+                else:
+                    return str(int(v)) if v.is_integer() else str(v)
+            pivoted = pivoted.applymap(fmt_val)
+            # 添加 Month Day 列
+            pivoted = pivoted.reset_index()
+            pivoted["Month"] = pivoted["date"].apply(lambda d: d.strftime("%b"))
+            pivoted["Day"] = pivoted["date"].apply(lambda d: str(d.day))
+            # 重新排列
+            data_rows = pivoted[["Month", "Day"] + act_names].values.tolist()
+        else:
+            data_rows = []
+
+        # 组合所有行
+        all_rows = [
+            mevb_row,
+            activity_row,
+            budget_row,
+        ] + data_rows
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter='\t')
+        for row in all_rows:
+            writer.writerow(row)
+        return output.getvalue()
+
+    # ---------- 内置演示 CSV ----------
     sample_csv = """Month	Day	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Weekly	Weekly	Weekly	Weekly	Monthly	Monthly	Monthly	Monthly	Monthly	Quartely	Quartely	Annual	Annual	Annual	Annual	Annual	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap
 MEVB Category		B	B	B	B	M	M	V	V	V	M	M	B	V	M	M	E	E	V	M	V	V	E	B	B	E	V	E	E	E	M	M	V
 Activity		Food & Water & Self care	Energy, Focus and Emotion	Basic Exercise	Foot step	>.5hour MAG	>.5hour books	Meditation	Sketch	Life Admin	Learn sth new	Movie	Extra Exercise	Monthly review	Invest	Play/Exhibits/lecture	Meet new people	Deep exposure to nature	Quarterly Review	CV & Jobs	Yearly Review + Plan	Annual leave	Family Gathering	Health Check	Extensive Journey (km)	People	Give back	Engage. Get buy in. Inspire.	Seek for help	Confident & Brave	Storytelling/talkative	AI	Growth Mindset
@@ -478,7 +580,7 @@ Jan	8	X		X	X	X		X	X																					X	X		X
 Jan	9	X	X	X	X			X	X						X											X		X					
 Jan	10	X		X				X	X	X					X											X	X						X"""
 
-    # 初始化 session_state
+    # ---------- 初始化 session_state ----------
     if "activity_template" not in st.session_state:
         st.session_state["activity_template"] = []
     if "budgets" not in st.session_state:
@@ -486,72 +588,56 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
     if "df_hist" not in st.session_state:
         st.session_state["df_hist"] = pd.DataFrame()
 
-    # 上传模板 CSV
+    # ---------- 上传模板 CSV ----------
     uploaded = st.file_uploader("Upload activity tracker CSV (template)", type="csv")
     if uploaded is not None:
         raw = uploaded.read().decode("utf-8-sig")
-        st.session_state["raw_csv"] = raw
-        template, budgets, hist = load_template_and_history(raw)
+        template, budgets, df_hist = parse_template_and_history(raw)
         st.session_state["activity_template"] = template
         st.session_state["budgets"] = budgets
-        df_hist = pd.DataFrame(hist) if hist else pd.DataFrame()
-        if not df_hist.empty:
-            df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
         st.session_state["df_hist"] = df_hist
-        st.success("New template loaded. Previous activity data replaced.")
+        st.success("Template loaded. History from CSV imported.")
     elif not st.session_state["activity_template"]:
         # 首次加载演示数据
-        template, budgets, hist = load_template_and_history(sample_csv)
+        template, budgets, df_hist = parse_template_and_history(sample_csv)
         st.session_state["activity_template"] = template
         st.session_state["budgets"] = budgets
-        st.session_state["raw_csv"] = sample_csv
-        df_hist = pd.DataFrame(hist)
-        if not df_hist.empty:
-            df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
         st.session_state["df_hist"] = df_hist
-        st.info("Using built-in demo template. Upload your own CSV to replace it.")
+        st.info("Using built-in demo data. Upload your own CSV to replace.")
 
-    # 获取最新状态
-    activity_template = st.session_state["activity_template"]
-    budgets = st.session_state["budgets"]
+    # 获取当前状态
+    activities = build_activities()
     df_hist = st.session_state["df_hist"]
 
-    # 构建活动列表（实时反映 budget 修改）
-    activities = []
-    for t in activity_template:
-        name = t["name"]
-        cat = t["category"]
-        budget = budgets.get(name, 0)
-        activities.append({"name": name, "category": cat, "budget": budget})
-
-    # ---------- 侧边栏备份/恢复 ----------
+    # ---------- 侧边栏：备份与恢复 ----------
     st.sidebar.markdown("---")
     st.sidebar.caption("💾 Backup & Restore")
-    if not df_hist.empty:
-        backup_csv = df_hist.to_csv(index=False)
+    # 导出模板兼容的备份
+    backup_template = export_template_csv()
+    if backup_template:
         st.sidebar.download_button(
-            "Download Backup",
-            backup_csv,
-            file_name=f"activity_backup_{date.today()}.csv"
+            "Download Template Backup (compatible)",
+            backup_template,
+            file_name=f"activity_backup_{date.today()}.csv",
+            mime="text/csv"
         )
-        st.sidebar.caption("Save this file to restore your progress later.")
+        st.sidebar.caption("Save this file. You can re-upload it later to restore all progress.")
     else:
         st.sidebar.info("No data to back up yet.")
 
-    backup_file = st.sidebar.file_uploader("Restore from backup CSV", type="csv", key="restore")
-    if backup_file is not None:
+    # 恢复备份（直接上传模板兼容的 CSV）
+    restore_file = st.sidebar.file_uploader("Restore from backup CSV", type="csv", key="restore")
+    if restore_file is not None:
         try:
-            restored = pd.read_csv(backup_file)
-            if {"date","activity","category","achieved","budget"}.issubset(restored.columns):
-                restored["date"] = pd.to_datetime(restored["date"]).dt.date
-                st.session_state["df_hist"] = restored
-                # 备份中可能不包含 budget 的最新修改，因此保留 budgets 不变
-                st.success("Backup restored! Your progress is back.")
-                st.rerun()
-            else:
-                st.sidebar.error("Invalid backup format.")
-        except:
-            st.sidebar.error("Error reading backup file.")
+            raw = restore_file.read().decode("utf-8-sig")
+            template, budgets, df_hist = parse_template_and_history(raw)
+            st.session_state["activity_template"] = template
+            st.session_state["budgets"] = budgets
+            st.session_state["df_hist"] = df_hist
+            st.success("Backup restored successfully! Refreshing...")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Error restoring backup: {e}")
 
     # ---------- 打卡界面 ----------
     st.markdown("### 📅 Select Date for Check-in")
@@ -574,25 +660,14 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
             updated_entries[act["name"]] = 1.0 if checked else 0.0
 
     if st.button("💾 Save Check-in for this date"):
-        df_hist = df_hist[df_hist["date"] != selected_date] if not df_hist.empty else df_hist
-        new_rows = []
-        for act in activities:
-            new_rows.append({
-                "date": selected_date,
-                "activity": act["name"],
-                "category": act["category"],
-                "achieved": updated_entries[act["name"]],
-                "budget": act["budget"]
-            })
-        df_new = pd.DataFrame(new_rows)
-        df_hist = pd.concat([df_hist, df_new], ignore_index=True)
-        df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
-        st.session_state["df_hist"] = df_hist
-        st.success("Check-in saved!")
+        save_checkin(selected_date, updated_entries)
+        st.success("Check-in saved! Refreshing...")
         st.rerun()
 
     # ---------- YTD 进度 ----------
     st.markdown("### 📊 Year-to-Date Progress")
+    # 重新获取最新数据（因为可能刚更新）
+    df_hist = st.session_state["df_hist"]
     if not df_hist.empty:
         ytd = df_hist[df_hist["date"].apply(lambda x: x.year == date.today().year)]
         if not ytd.empty:
@@ -668,24 +743,10 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
         new_budget = st.number_input(f"New budget for {selected_activity}", value=int(current_budget), min_value=0)
         if st.button("Update Budget"):
             st.session_state["budgets"][selected_activity] = float(new_budget)
+            # 同步更新 df_hist 中的 budget 字段
             if not df_hist.empty:
                 mask = df_hist["activity"] == selected_activity
                 df_hist.loc[mask, "budget"] = float(new_budget)
                 st.session_state["df_hist"] = df_hist
-            st.success(f"Budget updated to {new_budget}.")
+            st.success(f"Budget updated to {new_budget}. Refreshing...")
             st.rerun()
-
-    # ---------- 导出当前进度 ----------
-    st.markdown("### 📥 Export Current Data")
-    if not df_hist.empty:
-        wide_df = df_hist.pivot_table(index='date', columns='activity', values='achieved', aggfunc='sum')
-        wide_df = wide_df.reset_index().sort_values('date')
-        csv_buffer = io.StringIO()
-        wide_df.to_csv(csv_buffer, index=False)
-        st.download_button(
-            "Download activity log (wide format)",
-            csv_buffer.getvalue(),
-            file_name=f"activity_log_{date.today()}.csv"
-        )
-    else:
-        st.info("No data to export yet.")
