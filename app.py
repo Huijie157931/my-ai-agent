@@ -8,7 +8,7 @@ import google.generativeai as genai
 import requests
 import feedparser
 import streamlit.components.v1 as components
-import time, io, random
+import time, io, random, csv
 
 # ---------- 初始化 ----------
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -98,6 +98,8 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
+    # (保持原有的 Task 1 代码，此处省略以节省篇幅，实际请完整保留你之前成功运行的 Task 1)
+    # 这里请直接粘贴你上一版能正确运行的 Task 1 代码（包含德语、语音、新闻链接等）
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -188,6 +190,7 @@ if task.startswith("Task 1"):
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
+    # (保持原有的 Task 2 代码，同样请粘贴你之前成功的版本)
     st.subheader("📈 Major Stock Indices")
     st.caption(f"Latest data as of {today_date}")
 
@@ -249,6 +252,7 @@ elif task.startswith("Task 2"):
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
+    # (保持原有的 Task 3 代码)
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
         ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
@@ -293,6 +297,7 @@ elif task.startswith("Task 3"):
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
+    # (保持原有的 Task 4 代码)
     st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
     domain_rss = {
         "AGI / Artificial General Intelligence": [
@@ -359,6 +364,7 @@ elif task.startswith("Task 4"):
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
+    # (保持原有的 Task 5 代码)
     st.subheader("💡 Tech Trends & Podcast Recommendation")
     st.caption("Based on Product Hunt trending products")
     ph_rss = "https://www.producthunt.com/feed"
@@ -393,9 +399,10 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption(f"{today_date}")
 
+    # 内置样本 CSV（制表符分隔）
     sample_csv = """Month	Day	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Weekly	Weekly	Weekly	Weekly	Monthly	Monthly	Monthly	Monthly	Monthly	Quartely	Quartely	Annual	Annual	Annual	Annual	Annual	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap
 MEVB Category		B	B	B	B	M	M	V	V	V	M	M	B	V	M	M	E	E	V	M	V	V	E	B	B	E	V	E	E	E	M	M	V
-Activity		Food & Water & Self care	Energy, Focus and Emotion	Basic Exercise	Foot step	>.5hour MAG	>.5hour books	Meditation	Sketch	Life Admin	Learn sth new	Movie	Extra Exercise	Monthly review	Invest	Play/Exhibits/lecture	Meet new people	Deep exposure to nature	Quarterly Review	CV & Jobs	Yearly Review + Plan	Annual leave	Family Gathering	Health Check	Extensive Journey (km)	People	Give back	Engage. Get buy in. Inspire.	Seek for help	Confident & Brave	Storytelling/talkative	AI	Growth Mindset
+Activity		Food & Water & Self care	Energy, Focus and Emotion	Basic Exercise	Foot step	>.5hour MAG	>.5hour books	Meditation	Sketch	Life Admin	Learn sth new	Movie	Extra Exercise	Monthly review	Invest	Play/Exhibits/lecture	Meet new people	Deep exposure to nature	Quarterly Review 	CV & Jobs	Yearly Review + Plan 	Annual leave	Family Gathering	Health Check	Extensive Journey (km)	People	Give back	Engage. Get buy in. Inspire.	Seek for help	Confident & Brave	Storytelling/talkative	AI	Growth Mindset
 BUDGET		330	280	365	200	300	300	365	365	53	50	54	200	12	12	25	25	15	4	6	2	20	20	8	7	300	100	225	200	120	100	200	330
 YTD		139	118	145	42	105	53	149	149	22	44	10	31	3	9	3	26	16	1	11	0	0	10	5	0	90	52	68	58	54	27	38	122
 vs YTD BU (%)		3%	3%	-3%	-49%	-14%	-57%	0%	0%	2%	116%	-55%	-62%	-39%	84%	-71%	155%	161%	-39%	349%	-100%	-100%	22%	53%	-100%	-27%	27%	-26%	-29%	10%	-34%	-53%	-9%
@@ -410,63 +417,78 @@ Jan	8	X		X	X	X		X	X																					X	X		X
 Jan	9	X	X	X	X			X	X						X											X		X					
 Jan	10	X		X				X	X	X					X											X	X						X"""
 
+    # ---------- 上传或使用默认数据 ----------
     uploaded = st.file_uploader("Upload your activity tracker CSV", type="csv")
     if uploaded is not None:
-        raw = uploaded.read().decode("utf-8")
+        raw = uploaded.read().decode("utf-8-sig")  # 自动处理 BOM
         st.session_state["raw_csv"] = raw
-        if "df_hist" in st.session_state:
-            del st.session_state["df_hist"]
-        if "budgets" in st.session_state:
-            del st.session_state["budgets"]
+        # 清除旧数据
+        st.session_state.pop("df_hist", None)
+        st.session_state.pop("budgets", None)
         st.success("CSV uploaded. Data refreshed.")
     elif "raw_csv" not in st.session_state:
         st.session_state["raw_csv"] = sample_csv
         st.info("Using built-in demo data. Upload your own CSV to replace it.")
 
     raw_csv = st.session_state["raw_csv"]
-    sep = "\t"  # 强制使用 Tab 分隔符
 
-    lines = raw_csv.split("\n")
+    # ---------- 智能分隔符检测（使用 csv.Sniffer）----------
+    try:
+        sniffer = csv.Sniffer()
+        dialect = sniffer.sniff(raw_csv[:1024])  # 仅检测前 1KB
+        reader = csv.reader(raw_csv.splitlines(), dialect)
+    except:
+        # 如果检测失败，尝试用制表符回退
+        reader = csv.reader(raw_csv.splitlines(), delimiter='\t')
+
+    lines = list(reader)
     if len(lines) < 7:
-        st.error("CSV must have at least 7 rows.")
+        st.error("CSV must have at least 7 rows (header, category, activity, budget, ytd, vs ytd, data rows).")
         st.stop()
 
-    cat_line = lines[1].split(sep)
-    act_line = lines[2].split(sep)
-    budget_line = lines[3].split(sep) if len(lines) > 3 else []
+    # 提取关键行
+    cat_line = lines[1]  # 第二行：MEVB Category ...
+    act_line = lines[2]  # 第三行：Activity ...
+    budget_line = lines[3] if len(lines) > 3 else []
 
+    # 解析活动列表（优先使用已修改的 budgets）
     if "budgets" not in st.session_state:
         st.session_state["budgets"] = {}
     activities = []
-    for i in range(2, len(act_line)):
-        if i < len(cat_line) and cat_line[i].strip() in ("B","V","M","E"):
+    # 寻找第一个非空的活动名称列作为起始列（通常从索引2开始，但允许前面有空列）
+    start_col = next((i for i, val in enumerate(act_line) if val.strip() != "" and cat_line[i].strip() in ("B","V","M","E")), 2)
+    for i in range(start_col, len(act_line)):
+        cat = cat_line[i].strip() if i < len(cat_line) else ""
+        if cat in ("B","V","M","E"):
             name = act_line[i].strip()
-            cat = cat_line[i].strip()
+            if not name:
+                continue
+            # 预算值
             if name in st.session_state["budgets"]:
                 budget = st.session_state["budgets"][name]
             else:
                 try:
-                    budget = float(budget_line[i].strip())
+                    budget = float(budget_line[i].strip()) if i < len(budget_line) and budget_line[i].strip() else 0
                 except:
                     budget = 0
                 st.session_state["budgets"][name] = budget
             activities.append({"name": name, "category": cat, "budget": budget})
 
     if not activities:
-        st.error("No activities parsed.")
+        st.error("No activities parsed. Check CSV format: second row must contain B/V/M/E, third row activity names.")
         st.stop()
 
+    # ---------- 历史记录解析 ----------
     if "df_hist" not in st.session_state:
         records = []
-        for row_idx in range(5, len(lines)):
-            cols = lines[row_idx].split(sep)
-            if len(cols) < 3:
+        month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+        for row in lines[5:]:   # 从第6行开始（索引5），前几行是标题/预算
+            if not row or len(row) < 3:
                 continue
-            month_str = cols[0].strip()
-            day_str = cols[1].strip()
+            month_str = row[0].strip()
+            day_str = row[1].strip()
             if not month_str or not day_str:
                 continue
-            month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
             month = month_map.get(month_str)
             if not month:
                 continue
@@ -476,9 +498,9 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 continue
             record_date = date(date.today().year, month, day)
             for idx, act in enumerate(activities):
-                col_idx = idx + 2
-                if col_idx < len(cols):
-                    val = cols[col_idx].strip()
+                col_idx = start_col + idx
+                if col_idx < len(row):
+                    val = row[col_idx].strip()
                     if val.upper() == "X":
                         achieved = 1.0
                     elif val.replace(".","",1).isdigit():
