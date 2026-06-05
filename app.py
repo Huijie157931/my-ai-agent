@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo  # Python 3.9+ 内置，无需安装
 import yfinance as yf
 import google.generativeai as genai
 import requests
@@ -19,31 +20,36 @@ st.title("🤖 Personal AI Assistant – Full Demo")
 today_date = date.today().strftime("%B %d, %Y")
 st.caption(f"📅 {today_date}")
 
-# ---------- 辅助函数（提前定义，避免打断 if-elif 链） ----------
-def plot_intraday(name, ticker, interval="5m"):
+# ---------- 辅助绘图函数（时区转换）----------
+def plot_intraday(name, ticker, tz_name):
+    """绘制当日分时图，时间转换为指定时区"""
     try:
-        df = yf.Ticker(ticker).history(period="1d", interval=interval)
+        df = yf.Ticker(ticker).history(period="1d", interval="5m")
         if df.empty:
             return
+        # yfinance 返回的 index 没有时区，实际为 UTC，先本地化
+        df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
         open_price = df['Open'].iloc[0]
         last_price = df['Close'].iloc[-1]
         change = (last_price - open_price) / open_price * 100
         line_color = "red" if change >= 0 else "green"
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
-        ax.set_title(f"{name} ({interval})", fontsize=8)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax.set_title(f"{name} (Real-Time)", fontsize=8)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz=tz_name))
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
         st.pyplot(fig)
-    except:
+    except Exception:
         pass
 
-def plot_monthly(name, ticker):
+def plot_monthly(name, ticker, tz_name):
+    """绘制一个月趋势图，时间转换为指定时区"""
     try:
         df = yf.Ticker(ticker).history(period="1mo")
         if df.empty:
             return
+        df.index = df.index.tz_localize('UTC').tz_convert(tz_name)
         start_price = df['Close'].iloc[0]
         end_price = df['Close'].iloc[-1]
         change = (end_price - start_price) / start_price * 100
@@ -51,11 +57,11 @@ def plot_monthly(name, ticker):
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (1M)", fontsize=8)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d', tz=tz_name))
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
         st.pyplot(fig)
-    except:
+    except Exception:
         pass
 
 # ---------- 任务选择 ----------
@@ -173,7 +179,7 @@ elif task.startswith("Task 2"):
     }
 
     if st.button("Fetch Real-time Data"):
-        # 表格
+        # 表格数据
         rows = []
         for region, names in stocks.items():
             for name, ticker in names.items():
@@ -198,30 +204,30 @@ elif task.startswith("Task 2"):
         html += "</table>"
         st.markdown(html, unsafe_allow_html=True)
 
-        # 当日分时图 (左: A股/港股, 右: 美股)
+        # 当日分时图 (左: A股/港股 北京时间，右: 美股 纽约时间)
         col_left, col_right = st.columns([1, 1])
         with col_left:
-            st.markdown("**🇨🇳 A-Share / HK**")
-            plot_intraday("SSE Composite", "000001.SS")
-            plot_intraday("Shenzhen Index", "399001.SZ")
-            plot_intraday("Hang Seng", "^HSI")
+            st.markdown("**🇨🇳 A-Share / HK (Beijing Time)**")
+            plot_intraday("SSE Composite", "000001.SS", "Asia/Shanghai")
+            plot_intraday("Shenzhen Index", "399001.SZ", "Asia/Shanghai")
+            plot_intraday("Hang Seng", "^HSI", "Asia/Shanghai")
         with col_right:
-            st.markdown("**🇺🇸 US Market**")
-            plot_intraday("NASDAQ", "^IXIC")
-            plot_intraday("S&P 1500", "^SP1500")
-            plot_intraday("Dow Jones", "^DJI")
+            st.markdown("**🇺🇸 US Market (New York Time)**")
+            plot_intraday("NASDAQ", "^IXIC", "America/New_York")
+            plot_intraday("S&P 1500", "^SP1500", "America/New_York")
+            plot_intraday("Dow Jones", "^DJI", "America/New_York")
 
-        # 一个月趋势图 (左右分栏)
+        # 一个月趋势图 (同样按对应时区)
         st.markdown("**📅 1-Month Trend**")
         col_trend_left, col_trend_right = st.columns([1, 1])
         with col_trend_left:
-            plot_monthly("SSE Composite", "000001.SS")
-            plot_monthly("Shenzhen Index", "399001.SZ")
-            plot_monthly("Hang Seng", "^HSI")
+            plot_monthly("SSE Composite", "000001.SS", "Asia/Shanghai")
+            plot_monthly("Shenzhen Index", "399001.SZ", "Asia/Shanghai")
+            plot_monthly("Hang Seng", "^HSI", "Asia/Shanghai")
         with col_trend_right:
-            plot_monthly("NASDAQ", "^IXIC")
-            plot_monthly("S&P 1500", "^SP1500")
-            plot_monthly("Dow Jones", "^DJI")
+            plot_monthly("NASDAQ", "^IXIC", "America/New_York")
+            plot_monthly("S&P 1500", "^SP1500", "America/New_York")
+            plot_monthly("Dow Jones", "^DJI", "America/New_York")
     else:
         st.info("Click to fetch real-time stock data.")
 
@@ -537,7 +543,7 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 })
             df_progress = pd.DataFrame(progress_rows)
 
-            # 颜色样式
+            # 样式函数：返回颜色 CSS
             def status_color(val):
                 if val == "On Track":
                     return "background-color: #d4edda; color: #155724"
@@ -545,7 +551,9 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                     return "background-color: #fff3cd; color: #856404"
                 else:
                     return "background-color: #f8d7da; color: #721c24"
-            styled = df_progress.style.applymap(status_color, subset=["Status"])
+
+            # 使用 map 替代 applymap
+            styled = df_progress.style.map(status_color, subset=["Status"])
             st.dataframe(styled, use_container_width=True)
 
             # 大类进度
@@ -567,7 +575,7 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                         "Status": cat_status
                     })
             df_cat = pd.DataFrame(cat_summary)
-            styled_cat = df_cat.style.applymap(
+            styled_cat = df_cat.style.map(
                 lambda val: "background-color: #d4edda; color: #155724" if val == "On Track" else "background-color: #f8d7da; color: #721c24",
                 subset=["Status"]
             )
