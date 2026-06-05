@@ -393,8 +393,8 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption(f"{today_date}")
 
-    # ---------- 辅助：加载模板 ----------
-    def load_template_from_csv(raw_csv):
+    # ---------- 辅助：加载模板 + 历史数据 ----------
+    def load_template_and_history(raw_csv):
         try:
             sniffer = csv.Sniffer()
             dialect = sniffer.sniff(raw_csv[:1024])
@@ -403,7 +403,7 @@ elif task.startswith("Task 6"):
             reader = csv.reader(raw_csv.splitlines(), delimiter='\t')
         lines = list(reader)
         if len(lines) < 4:
-            return [], {}
+            return [], {}, []
         cat_line = lines[1]
         act_line = lines[2]
         budget_line = lines[3] if len(lines) > 3 else []
@@ -422,9 +422,45 @@ elif task.startswith("Task 6"):
                     budget = 0
                 template.append({"name": name, "category": cat})
                 budgets[name] = budget
-        return template, budgets
 
-    # 样本 CSV
+        # 解析历史数据
+        month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+        history = []
+        for row in lines[5:]:
+            if not row or len(row) < 3:
+                continue
+            month_str = row[0].strip()
+            day_str = row[1].strip()
+            if not month_str or not day_str:
+                continue
+            month = month_map.get(month_str)
+            if not month:
+                continue
+            try:
+                day = int(day_str)
+            except:
+                continue
+            record_date = date(date.today().year, month, day)
+            for idx, act in enumerate(template):
+                col_idx = start + idx
+                if col_idx < len(row):
+                    val = row[col_idx].strip()
+                    if val.upper() == "X":
+                        achieved = 1.0
+                    elif val.replace(".","",1).isdigit():
+                        achieved = float(val)
+                    else:
+                        achieved = 0.0
+                    history.append({
+                        "date": record_date,
+                        "activity": act["name"],
+                        "category": act["category"],
+                        "achieved": achieved,
+                        "budget": budgets[act["name"]]
+                    })
+        return template, budgets, history
+
+    # 内置演示数据
     sample_csv = """Month	Day	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Daily	Weekly	Weekly	Weekly	Weekly	Monthly	Monthly	Monthly	Monthly	Monthly	Quartely	Quartely	Annual	Annual	Annual	Annual	Annual	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap	Daily Recap
 MEVB Category		B	B	B	B	M	M	V	V	V	M	M	B	V	M	M	E	E	V	M	V	V	E	B	B	E	V	E	E	E	M	M	V
 Activity		Food & Water & Self care	Energy, Focus and Emotion	Basic Exercise	Foot step	>.5hour MAG	>.5hour books	Meditation	Sketch	Life Admin	Learn sth new	Movie	Extra Exercise	Monthly review	Invest	Play/Exhibits/lecture	Meet new people	Deep exposure to nature	Quarterly Review	CV & Jobs	Yearly Review + Plan	Annual leave	Family Gathering	Health Check	Extensive Journey (km)	People	Give back	Engage. Get buy in. Inspire.	Seek for help	Confident & Brave	Storytelling/talkative	AI	Growth Mindset
@@ -442,7 +478,7 @@ Jan	8	X		X	X	X		X	X																					X	X		X
 Jan	9	X	X	X	X			X	X						X											X		X					
 Jan	10	X		X				X	X	X					X											X	X						X"""
 
-    # ---------- 持久化状态 ----------
+    # 初始化 session_state
     if "activity_template" not in st.session_state:
         st.session_state["activity_template"] = []
     if "budgets" not in st.session_state:
@@ -450,29 +486,38 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
     if "df_hist" not in st.session_state:
         st.session_state["df_hist"] = pd.DataFrame()
 
-    # ---------- 上传模板 CSV ----------
+    # 上传模板 CSV
     uploaded = st.file_uploader("Upload activity tracker CSV (template)", type="csv")
     if uploaded is not None:
         raw = uploaded.read().decode("utf-8-sig")
         st.session_state["raw_csv"] = raw
-        template, budgets = load_template_from_csv(raw)
+        template, budgets, hist = load_template_and_history(raw)
         st.session_state["activity_template"] = template
         st.session_state["budgets"] = budgets
-        # 模板更换时清空历史数据（防止错位）
-        st.session_state["df_hist"] = pd.DataFrame()
-        st.success("New template loaded. Previous activity data cleared.")
+        # 上传新模板时，用文件中的历史数据覆盖（用户可后续恢复备份）
+        df_hist = pd.DataFrame(hist) if hist else pd.DataFrame()
+        if not df_hist.empty:
+            df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
+        st.session_state["df_hist"] = df_hist
+        st.success("New template loaded. Previous activity data replaced.")
     elif not st.session_state["activity_template"]:
-        template, budgets = load_template_from_csv(sample_csv)
+        # 首次加载演示数据
+        template, budgets, hist = load_template_and_history(sample_csv)
         st.session_state["activity_template"] = template
         st.session_state["budgets"] = budgets
         st.session_state["raw_csv"] = sample_csv
-        st.info("Using built-in demo template. Upload your own CSV to replace it.")
+        df_hist = pd.DataFrame(hist)
+        if not df_hist.empty:
+            df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
+        st.session_state["df_hist"] = df_hist
+        st.info("Using built-in demo template and sample data. Upload your own CSV to replace it.")
 
+    # 获取当前状态
     activity_template = st.session_state["activity_template"]
     budgets = st.session_state["budgets"]
     df_hist = st.session_state["df_hist"]
 
-    # 构建当前 activities 列表（包含最新 budget）
+    # 构建活动列表（含最新预算）
     activities = []
     for t in activity_template:
         name = t["name"]
