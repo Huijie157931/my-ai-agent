@@ -8,7 +8,7 @@ import google.generativeai as genai
 import requests
 import feedparser
 import streamlit.components.v1 as components
-import time, re, io, random
+import time, io, random
 
 # ---------- 初始化 ----------
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -32,19 +32,17 @@ task = st.sidebar.selectbox(
 )
 
 # ==================== TASK 1 ====================
+# ... (保持之前的 Task 1 代码不变，包括 BBC 新闻抓取和语音按钮)
 if task.startswith("Task 1"):
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
-
-    # 抓取 BBC 新闻
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
     news_title = ""
     news_link = ""
     try:
         feed = feedparser.parse(bbc_rss)
         if feed.entries:
-            # 随机选一条或取第一条
-            chosen = feed.entries[0]  # 可改为 random.choice(feed.entries[:5])
+            chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
             news_title = chosen.title
             news_link = chosen.link
     except:
@@ -121,38 +119,40 @@ if task.startswith("Task 1"):
                     st.markdown(f"**📐 Grammar Note:** {grammar}")
             except Exception as e:
                 st.error(f"API error: {e}")
+    else:
+        st.info("Click the button to generate a sentence based on today’s news.")
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
     st.subheader("📈 Major Stock Indices")
     st.caption(f"Latest data as of {today_date}")
-    indices = {
-        "SSE Composite": "000001.SS",
-        "Shenzhen Index": "399001.SZ",
-        "Hang Seng": "^HSI",
-        "NASDAQ": "^IXIC",
-        "S&P 1500": "^SP1500",
-        "Dow Jones": "^DJI",
+
+    # 股票定义
+    stocks = {
+        "A-Share": {"SSE Composite": "000001.SS", "Shenzhen Index": "399001.SZ"},
+        "HK": {"Hang Seng": "^HSI"},
+        "US": {"NASDAQ": "^IXIC", "S&P 1500": "^SP1500", "Dow Jones": "^DJI"}
     }
 
-    if st.button("Fetch Latest Data"):
+    if st.button("Fetch Real-time Data"):
         # 表格数据
         rows = []
-        for name, ticker in indices.items():
-            try:
-                info = yf.Ticker(ticker).history(period="5d")
-                if not info.empty:
-                    last = info['Close'].iloc[-1]
-                    prev = info['Close'].iloc[-2] if len(info) > 1 else last
-                    change = (last - prev) / prev * 100
-                    sign = "+" if change >= 0 else ""
-                    # 用户要求：红涨绿跌
-                    color = "red" if change >= 0 else "green"
-                    rows.append((name, f"{last:.2f}", f"{sign}{change:.2f}%", color))
-                else:
-                    rows.append((name, "N/A", "-", "gray"))
-            except:
-                rows.append((name, "Error", "-", "gray"))
+        for region, names in stocks.items():
+            for name, ticker in names.items():
+                try:
+                    info = yf.Ticker(ticker).history(period="1d", interval="5m")
+                    if not info.empty:
+                        last = info['Close'].iloc[-1]
+                        open_price = info['Open'].iloc[0]
+                        change = (last - open_price) / open_price * 100
+                        sign = "+" if change >= 0 else ""
+                        # 红涨绿跌
+                        color = "red" if change >= 0 else "green"
+                        rows.append((name, f"{last:.2f}", f"{sign}{change:.2f}%", color))
+                    else:
+                        rows.append((name, "N/A", "-", "gray"))
+                except:
+                    rows.append((name, "Error", "-", "gray"))
 
         html = "<table style='width:100%; border-collapse: collapse;'>"
         html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
@@ -161,56 +161,82 @@ elif task.startswith("Task 2"):
         html += "</table>"
         st.markdown(html, unsafe_allow_html=True)
 
-        # 当日分时走势图（尝试获取分钟数据）
-        st.markdown("**📊 Today's Intraday (from open to latest)**")
-        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
-        axes = axes.flatten()
-        for idx, (name, ticker) in enumerate(indices.items()):
-            ax = axes[idx]
-            try:
-                df_intra = yf.Ticker(ticker).history(period="1d", interval="5m")
-                if not df_intra.empty and len(df_intra) > 1:
-                    ax.plot(df_intra.index, df_intra['Close'], color='blue')
-                    ax.set_title(name, fontsize=9)
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-                else:
-                    # 降级为简单显示开盘和当前
-                    info = yf.Ticker(ticker).history(period="1d")
-                    if not info.empty:
-                        open_price = info['Open'].iloc[0]
-                        last_price = info['Close'].iloc[-1]
-                        ax.bar(['Open','Current'], [open_price, last_price], color=['gray','blue'])
-                        ax.set_title(name, fontsize=9)
-                    else:
-                        ax.text(0.5,0.5,'No data', ha='center')
-            except:
-                ax.text(0.5,0.5,'Error', ha='center')
-        plt.tight_layout()
-        st.pyplot(fig)
+        # 布局：左侧 A股港股，右侧美股
+        col_left, col_right = st.columns([1, 1])
 
-        # 一个月走势（2x3子图）
+        with col_left:
+            st.markdown("**🇨🇳 A-Share / HK**")
+            # 上证
+            self_plot_intraday("SSE Composite", "000001.SS", "5m")
+            # 深证
+            self_plot_intraday("Shenzhen Index", "399001.SZ", "5m")
+            # 恒生
+            self_plot_intraday("Hang Seng", "^HSI", "5m")
+
+        with col_right:
+            st.markdown("**🇺🇸 US Market**")
+            # 纳斯达克
+            self_plot_intraday("NASDAQ", "^IXIC", "5m")
+            # 标普1500
+            self_plot_intraday("S&P 1500", "^SP1500", "5m")
+            # 道琼斯
+            self_plot_intraday("Dow Jones", "^DJI", "5m")
+
+        # 一个月趋势小图（同样左右分栏）
         st.markdown("**📅 1-Month Trend**")
-        fig2, axes2 = plt.subplots(3, 2, figsize=(12, 10))
-        axes2 = axes2.flatten()
-        for idx, (name, ticker) in enumerate(indices.items()):
-            ax = axes2[idx]
-            try:
-                hist = yf.Ticker(ticker).history(period="1mo")
-                if not hist.empty:
-                    ax.plot(hist.index, hist['Close'], color='blue')
-                    ax.set_title(name, fontsize=9)
-                    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-                else:
-                    ax.text(0.5,0.5,'No data', ha='center')
-            except:
-                ax.text(0.5,0.5,'Error', ha='center')
-        plt.tight_layout()
-        st.pyplot(fig2)
+        col_trend_left, col_trend_right = st.columns([1, 1])
+        with col_trend_left:
+            self_plot_monthly("SSE Composite", "000001.SS")
+            self_plot_monthly("Shenzhen Index", "399001.SZ")
+            self_plot_monthly("Hang Seng", "^HSI")
+        with col_trend_right:
+            self_plot_monthly("NASDAQ", "^IXIC")
+            self_plot_monthly("S&P 1500", "^SP1500")
+            self_plot_monthly("Dow Jones", "^DJI")
     else:
         st.info("Click to fetch real-time stock data.")
 
+# 辅助绘图函数
+def self_plot_intraday(name, ticker, interval="5m"):
+    try:
+        df = yf.Ticker(ticker).history(period="1d", interval=interval)
+        if df.empty:
+            return
+        open_price = df['Open'].iloc[0]
+        last_price = df['Close'].iloc[-1]
+        change = (last_price - open_price) / open_price * 100
+        line_color = "red" if change >= 0 else "green"
+        fig, ax = plt.subplots(figsize=(3.5, 1.8))
+        ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
+        ax.set_title(f"{name} ({interval})", fontsize=8)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.xticks(fontsize=6)
+        plt.yticks(fontsize=6)
+        st.pyplot(fig)
+    except:
+        pass
+
+def self_plot_monthly(name, ticker):
+    try:
+        df = yf.Ticker(ticker).history(period="1mo")
+        if df.empty:
+            return
+        start_price = df['Close'].iloc[0]
+        end_price = df['Close'].iloc[-1]
+        change = (end_price - start_price) / start_price * 100
+        line_color = "red" if change >= 0 else "green"
+        fig, ax = plt.subplots(figsize=(3.5, 1.8))
+        ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
+        ax.set_title(f"{name} (1M)", fontsize=8)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+        plt.xticks(fontsize=6)
+        plt.yticks(fontsize=6)
+        st.pyplot(fig)
+    except:
+        pass
+
 # ==================== TASK 3 ====================
-# (保留上一版的 Task3 代码，不做大改)
+# (保持 Task 3 代码不变)
 elif task.startswith("Task 3"):
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
@@ -256,6 +282,7 @@ elif task.startswith("Task 3"):
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
+    # (保持 Task 4 代码不变)
     st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
     domain_rss = {
         "AGI / Artificial General Intelligence": [
@@ -322,6 +349,7 @@ elif task.startswith("Task 4"):
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
+    # (保持 Task 5 代码不变)
     st.subheader("💡 Tech Trends & Podcast Recommendation")
     st.caption("Based on Product Hunt trending products")
     ph_rss = "https://www.producthunt.com/feed"
@@ -475,7 +503,6 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
             updated_entries[act["name"]] = 1.0 if checked else 0.0
 
     if st.button("💾 Save Check-in for this date"):
-        # 删除旧记录，写入新记录
         df_hist = df_hist[df_hist["date"] != selected_date] if not df_hist.empty else df_hist
         new_rows = []
         for act in activities:
@@ -504,39 +531,38 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 name = act["name"]
                 budget = act["budget"]
                 actual = ytd[ytd["activity"] == name]["achieved"].sum()
-                expected_ratio = (budget / 365) * days_passed / budget if budget > 0 else 0
+                expected = round(budget * days_passed / 365, 1)
                 actual_ratio = actual / budget if budget > 0 else 0
-                # 状态定义
-                if actual_ratio >= expected_ratio * 1.05:
-                    status = "Ahead"
-                    color = "green"
-                elif actual_ratio >= expected_ratio * 0.95:
+                expected_ratio = expected / budget if budget > 0 else 0
+                if actual >= expected:
                     status = "On Track"
-                    color = "green"
+                elif actual >= expected * 0.8:
+                    status = "Slightly Behind"
                 else:
                     status = "Behind"
-                    color = "red"
                 progress_rows.append({
                     "Category": act["category"],
                     "Activity": name,
                     "Annual Target": budget,
                     "Actual YTD": actual,
-                    "Expected YTD": round(budget * days_passed / 365, 1),
+                    "Expected YTD": expected,
                     "Progress %": f"{actual_ratio:.1%}",
-                    "Status": status,
-                    "Status Color": color
+                    "Status": status
                 })
             df_progress = pd.DataFrame(progress_rows)
 
-            # 带颜色显示
-            def color_status(val):
-                if val == "Ahead" or val == "On Track":
-                    return "color: green"
-                return "color: red"
-            styled = df_progress.style.applymap(color_status, subset=["Status"])
+            # 用 st.dataframe 配合 column_config 显示颜色
+            def status_color(val):
+                if val == "On Track":
+                    return "background-color: #d4edda; color: #155724"
+                elif val == "Slightly Behind":
+                    return "background-color: #fff3cd; color: #856404"
+                else:
+                    return "background-color: #f8d7da; color: #721c24"
+            styled = df_progress.style.applymap(status_color, subset=["Status"])
             st.dataframe(styled, use_container_width=True)
 
-            # 大类进度（B/V/M/E）
+            # 大类进度
             st.markdown("**Category Totals**")
             cat_summary = []
             for cat in categories:
@@ -544,30 +570,25 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
                 if cat_acts:
                     total_budget = sum(a["budget"] for a in cat_acts)
                     total_actual = sum(ytd[ytd["activity"] == a["name"]]["achieved"].sum() for a in cat_acts)
-                    expected = total_budget * days_passed / 365
-                    cat_progress_pct = total_actual / total_budget if total_budget > 0 else 0
-                    cat_expected_pct = expected / total_budget if total_budget > 0 else 0
-                    cat_status = "On Track" if total_actual >= expected * 0.95 else "Behind"
-                    cat_color = "green" if cat_status == "On Track" else "red"
+                    expected_cat = total_budget * days_passed / 365
+                    cat_pct = total_actual / total_budget if total_budget > 0 else 0
+                    cat_status = "On Track" if total_actual >= expected_cat else "Behind"
                     cat_summary.append({
                         "Category": cat,
                         "Total Target": total_budget,
                         "Actual": total_actual,
-                        "Expected": round(expected, 1),
-                        "Progress %": f"{cat_progress_pct:.1%}",
-                        "Status": cat_status,
-                        "Color": cat_color
+                        "Expected": round(expected_cat, 1),
+                        "Progress %": f"{cat_pct:.1%}",
+                        "Status": cat_status
                     })
             df_cat = pd.DataFrame(cat_summary)
-            def color_cat_status(val):
-                if val == "On Track":
-                    return "color: green"
-                return "color: red"
-            styled_cat = df_cat.style.applymap(color_cat_status, subset=["Status"])
+            styled_cat = df_cat.style.applymap(
+                lambda val: "background-color: #d4edda; color: #155724" if val == "On Track" else "background-color: #f8d7da; color: #721c24",
+                subset=["Status"]
+            )
             st.dataframe(styled_cat, use_container_width=True)
-
         else:
-            st.info("No data for this year yet.")
+            st.info("No data for current year yet.")
     else:
         st.info("No activity data loaded.")
 
@@ -581,7 +602,6 @@ Jan	10	X		X				X	X	X					X											X	X						X"""
             if a["name"] == selected_activity:
                 a["budget"] = new_budget
                 break
-        # 同时更新 df_hist 中该活动的 budget 列
         if not df_hist.empty:
             mask = df_hist["activity"] == selected_activity
             df_hist.loc[mask, "budget"] = new_budget
