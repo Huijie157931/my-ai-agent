@@ -98,7 +98,7 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
-    # ... (保持不变)
+    # ... (保持你满意的 Task 1，内容不变)
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -282,7 +282,7 @@ elif task.startswith("Task 3"):
 
 # ==================== TASK 4 (30 days) ====================
 elif task.startswith("Task 4"):
-    # ... (与上一版相同，不再重复)
+    # ... (保持你认可的逻辑)
     st.subheader("🌍 Five Global Frontiers (Last 30 Days)")
     domain_rss = {
         "AGI / AI Agents": [
@@ -337,10 +337,37 @@ elif task.startswith("Task 4"):
     else:
         st.info("Click to fetch headlines for each frontier area (past 30 days).")
 
-# ==================== TASK 5: Product Hunt (去噪音) ====================
+# ==================== TASK 5: Product Hunt（彻底删除 Discussion|Link 噪音）====================
 elif task.startswith("Task 5"):
     st.subheader("🔥 Trending on Product Hunt")
     st.caption("Latest 5 products with description and time")
+
+    # 专用清洗函数
+    def clean_ph_description(raw_html):
+        # 1. 去除 HTML 标签
+        text = re.sub(r'<[^>]+>', '', raw_html).strip()
+        # 2. 按行拆分，过滤掉只包含 Discussion, Link, | 或空白的行
+        filtered_lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            # 忽略纯元数据行
+            if not stripped:
+                continue
+            if re.fullmatch(r'Discussion\s*', stripped, re.IGNORECASE):
+                continue
+            if re.fullmatch(r'Link\s*', stripped, re.IGNORECASE):
+                continue
+            if stripped == '|':
+                continue
+            filtered_lines.append(stripped)
+        # 3. 重新合并
+        cleaned = '\n'.join(filtered_lines).strip()
+        # 4. 如果只剩 "Discussion | Link" 的某种排列，最终为空
+        if cleaned.lower().replace(' ','').replace('\n','') == 'discussion|link':
+            cleaned = ""
+        if len(cleaned) > 200:
+            cleaned = cleaned[:200] + "..."
+        return cleaned
 
     ph_rss = "https://www.producthunt.com/feed"
 
@@ -354,13 +381,7 @@ elif task.startswith("Task 5"):
                         link = entry.link
                         pub_time = entry.get("published", entry.get("updated", ""))
                         raw_desc = entry.get("summary", entry.get("description", ""))
-                        # 去除 HTML 标签
-                        clean_desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
-                        # 过滤 "Discussion | Link" 这种纯元数据行
-                        if re.fullmatch(r'Discussion\s*\|\s*Link', clean_desc, re.IGNORECASE):
-                            clean_desc = ""
-                        if len(clean_desc) > 200:
-                            clean_desc = clean_desc[:200] + "..."
+                        clean_desc = clean_ph_description(raw_desc)
 
                         st.markdown(f"#### [{title}]({link})")
                         if pub_time:
