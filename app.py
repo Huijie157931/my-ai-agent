@@ -8,7 +8,7 @@ import google.generativeai as genai
 import requests
 import feedparser
 import streamlit.components.v1 as components
-import time, io, random, csv
+import time, io, random, csv, re
 
 # ---------- 初始化 ----------
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -98,6 +98,7 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
+    # ... (保持不变，你已满意)
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -188,6 +189,7 @@ if task.startswith("Task 1"):
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
+    # ... (保持不变)
     st.subheader("📈 Major Stock Indices")
     st.caption(f"Latest data as of {today_date}")
 
@@ -249,6 +251,7 @@ elif task.startswith("Task 2"):
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
+    # ... (保持不变)
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
         ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
@@ -281,9 +284,10 @@ elif task.startswith("Task 3"):
 elif task.startswith("Task 4"):
     st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
     domain_rss = {
-        "AGI / Artificial General Intelligence": [
+        "AGI / AI Agents": [  # 改名并增加 MIT Technology Review
             ("Synced Review", "https://syncedreview.com/feed/"),
             ("AI News", "https://www.artificialintelligence-news.com/feed/"),
+            ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
         ],
         "Global Order Restructuring": [
             ("Reuters World", "https://www.reuters.com/world/rss"),
@@ -303,7 +307,6 @@ elif task.startswith("Task 4"):
         ],
     }
 
-    # 时效过滤：只保留最近7天
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     if st.button("Fetch Latest Headlines"):
@@ -314,15 +317,16 @@ elif task.startswith("Task 4"):
                 for src_name, url in feeds:
                     try:
                         feed = feedparser.parse(url)
-                        for entry in feed.entries[:3]:   # 多取1条，以防全部被过滤
+                        for entry in feed.entries[:3]:
                             pub_parsed = entry.get("published_parsed")
                             if pub_parsed:
                                 pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
                                 if pub_dt < cutoff:
-                                    continue   # 过滤旧闻
+                                    continue
                             found = True
                             st.markdown(f"- **{src_name}**: [{entry.title}]({entry.link}) ({entry.get('published','')})")
-                            if found: break   # 只取该源的最新有效一条
+                            if found:
+                                break
                     except:
                         continue
                 if not found:
@@ -335,20 +339,24 @@ elif task.startswith("Task 5"):
     st.subheader("🎙️ Latest Podcast Episodes & Product Hunt Trends")
     st.caption("New episodes from your selected shows")
 
-    # 播客 RSS 列表（已验证可用）
+    # 播客 RSS 列表
     podcast_feeds = {
         "Hard Fork": "https://rss.art19.com/hard-fork",
         "Latent Space": "https://www.latent.space/feed",
-        "The a16z Show": "https://feeds.megaphone.fm/HSM6258835768",   # 官方 Megaphone feed
+        "The a16z Show": "https://feeds.megaphone.fm/HSM6258835768",
         "No Priors AI": "https://feeds.megaphone.fm/nopriors",
         "Exponential View": "https://exponentialview.co/feed",
     }
+
+    def clean_summary(html_text):
+        """去除 HTML 标签，截取前 200 个字符"""
+        clean = re.sub(r'<[^>]+>', '', html_text)
+        return clean.strip()[:200]
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
         st.subheader("📻 Recent Episodes")
-        # 抓取每个播客的最新一期（或最近两期）
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         for show, rss_url in podcast_feeds.items():
             st.markdown(f"**{show}**")
@@ -361,10 +369,15 @@ elif task.startswith("Task 5"):
                         pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
                         if pub_dt < cutoff:
                             continue
-                    recent.append((entry.title, entry.link, entry.get("published", "")))
+                    # 获取摘要
+                    summary = entry.get("summary") or entry.get("description") or ""
+                    summary_clean = clean_summary(summary)
+                    recent.append((entry.title, entry.link, entry.get("published", ""), summary_clean))
                 if recent:
-                    for title, link, pub in recent[:2]:   # 每个播客最多显示2期
+                    for title, link, pub, summary in recent[:2]:
                         st.markdown(f"- [{title}]({link}) ({pub})")
+                        if summary:
+                            st.caption(f"_{summary}_")
                 else:
                     st.caption("No new episode in the last week.")
             except Exception as e:
@@ -376,7 +389,12 @@ elif task.startswith("Task 5"):
         try:
             ph_feed = feedparser.parse(ph_rss)
             for entry in ph_feed.entries[:5]:
-                st.markdown(f"- [{entry.title}]({entry.link})")
+                st.markdown(f"- **[{entry.title}]({entry.link})**")
+                # 产品简介
+                desc = entry.get("summary") or entry.get("description") or ""
+                desc_clean = clean_summary(desc)
+                if desc_clean:
+                    st.caption(desc_clean)
         except:
             st.caption("Product Hunt data unavailable.")
 
