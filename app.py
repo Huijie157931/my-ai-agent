@@ -98,7 +98,7 @@ task = st.sidebar.selectbox(
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
-    # (保持不变)
+    # ... (保持不变)
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -189,7 +189,7 @@ if task.startswith("Task 1"):
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
-    # (保持不变)
+    # ... (保持不变)
     st.subheader("📈 Major Stock Indices")
     st.caption(f"Latest data as of {today_date}")
 
@@ -251,7 +251,7 @@ elif task.startswith("Task 2"):
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
-    # (保持不变)
+    # ... (保持不变)
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
         ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
@@ -280,8 +280,9 @@ elif task.startswith("Task 3"):
     else:
         st.info("Click to fetch the latest STM publishing headlines.")
 
-# ==================== TASK 4 (30 days, show all recent entries) ====================
+# ==================== TASK 4 (30 days) ====================
 elif task.startswith("Task 4"):
+    # ... (与上一版相同，不再重复)
     st.subheader("🌍 Five Global Frontiers (Last 30 Days)")
     domain_rss = {
         "AGI / AI Agents": [
@@ -327,7 +328,7 @@ elif task.startswith("Task 4"):
                             found_any = True
                             st.markdown(f"- **{src_name}**: [{entry.title}]({entry.link}) ({entry.get('published','')})")
                             count += 1
-                            if count >= 3:  # 每个源最多显示3条
+                            if count >= 3:
                                 break
                     except:
                         continue
@@ -336,7 +337,7 @@ elif task.startswith("Task 4"):
     else:
         st.info("Click to fetch headlines for each frontier area (past 30 days).")
 
-# ==================== TASK 5: Product Hunt (top 5, compact) ====================
+# ==================== TASK 5: Product Hunt (去噪音) ====================
 elif task.startswith("Task 5"):
     st.subheader("🔥 Trending on Product Hunt")
     st.caption("Latest 5 products with description and time")
@@ -348,29 +349,25 @@ elif task.startswith("Task 5"):
             try:
                 feed = feedparser.parse(ph_rss)
                 if feed.entries:
-                    # 只显示前 5 个
                     for i, entry in enumerate(feed.entries[:5]):
                         title = entry.title
                         link = entry.link
-                        # 发布时间
                         pub_time = entry.get("published", entry.get("updated", ""))
-                        # 简介
                         raw_desc = entry.get("summary", entry.get("description", ""))
+                        # 去除 HTML 标签
                         clean_desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
-                        # 过滤掉 Discussion | Link 等元数据噪音
-                        if clean_desc.startswith("Discussion") and "Link" in clean_desc and len(clean_desc) < 80:
+                        # 过滤 "Discussion | Link" 这种纯元数据行
+                        if re.fullmatch(r'Discussion\s*\|\s*Link', clean_desc, re.IGNORECASE):
                             clean_desc = ""
-                        # 截取合适长度
                         if len(clean_desc) > 200:
                             clean_desc = clean_desc[:200] + "..."
 
-                        # 使用更小的标题和段落
                         st.markdown(f"#### [{title}]({link})")
                         if pub_time:
                             st.caption(f"🕒 {pub_time}")
                         if clean_desc:
                             st.markdown(clean_desc)
-                        if i < 4:  # 最后一个不加分割线
+                        if i < 4:
                             st.markdown("---")
                 else:
                     st.warning("No products found.")
