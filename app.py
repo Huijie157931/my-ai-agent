@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import yfinance as yf
 import google.generativeai as genai
 import requests
@@ -275,7 +275,7 @@ elif task.startswith("Task 3"):
             else:
                 st.warning("Could not fetch any RSS feeds. Please try again later.")
     else:
-        st.info("Click to fetch the latest STM publishing headlines (no AI summary).")
+        st.info("Click to fetch the latest STM publishing headlines.")
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
@@ -302,6 +302,10 @@ elif task.startswith("Task 4"):
             ("Fierce Biotech", "https://www.fiercebiotech.com/feed"),
         ],
     }
+
+    # 时效过滤：只保留最近7天
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
     if st.button("Fetch Latest Headlines"):
         with st.spinner("Fetching..."):
             for domain, feeds in domain_rss.items():
@@ -310,56 +314,73 @@ elif task.startswith("Task 4"):
                 for src_name, url in feeds:
                     try:
                         feed = feedparser.parse(url)
-                        for entry in feed.entries[:2]:
+                        for entry in feed.entries[:3]:   # 多取1条，以防全部被过滤
+                            pub_parsed = entry.get("published_parsed")
+                            if pub_parsed:
+                                pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
+                                if pub_dt < cutoff:
+                                    continue   # 过滤旧闻
                             found = True
                             st.markdown(f"- **{src_name}**: [{entry.title}]({entry.link}) ({entry.get('published','')})")
+                            if found: break   # 只取该源的最新有效一条
                     except:
                         continue
                 if not found:
-                    st.caption("No recent headlines available.")
+                    st.caption("No recent headlines in the past 7 days.")
     else:
-        st.info("Click to fetch headlines for each frontier area (no AI summary).")
+        st.info("Click to fetch headlines for each frontier area (only past 7 days).")
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
-    st.subheader("💡 Tech Trends & Podcast Recommendation")
-    st.caption("Based on Product Hunt trending products")
-    ph_rss = "https://www.producthunt.com/feed"
-    if st.button("Analyze & Recommend"):
-        with st.spinner("Analyzing..."):
-            ph_entries = []
-            try:
-                feed = feedparser.parse(ph_rss)
-                for entry in feed.entries[:5]:
-                    ph_entries.append((entry.title, entry.link))
-            except:
-                pass
-            if ph_entries:
-                ph_lines = [f"- [{title}]({link})" for title, link in ph_entries]
-                ph_text = "\n".join(ph_lines)
-                prompt = (
-                    f"Today is {today_date}. Below are the trending products on Product Hunt:\n{ph_text}\n\n"
-                    "Based on these products, identify the top 2-3 tech/AI trends this week. List them as bullet points with a brief explanation. "
-                    "Then, recommend ONE podcast episode from this list: The a16z Show, Exponential View, Hard Fork, Latent Space, No Priors AI "
-                    "that best matches these trends. Provide the podcast name, the specific episode title (if you can find a recent relevant one), "
-                    "a direct listen link (or a search URL like 'https://www.google.com/search?q=Hard+Fork+latest+episode'), and a one‑sentence reason for the recommendation. "
-                    "Do NOT fabricate episode details. If unsure, say 'I recommend checking the latest episode of [Podcast]' and provide the podcast's official website."
-                )
-                try:
-                    resp = model.generate_content(prompt)
-                    st.markdown(resp.text)
-                except Exception as e:
-                    st.error(f"Gemini error: {e}")
-                # 同时显示 Product Hunt 来源
-                st.markdown("**🔗 Trending on Product Hunt (source)**")
-                for title, link in ph_entries:
-                    st.markdown(f"- [{title}]({link})")
-            else:
-                st.warning("Product Hunt data unavailable.")
-    else:
-        st.info("Click to analyze trends and get a podcast recommendation.")
+    st.subheader("🎙️ Latest Podcast Episodes & Product Hunt Trends")
+    st.caption("New episodes from your selected shows")
 
-# ==================== TASK 6 (简化占位) ====================
+    # 播客 RSS 列表（已验证可用）
+    podcast_feeds = {
+        "Hard Fork": "https://rss.art19.com/hard-fork",
+        "Latent Space": "https://www.latent.space/feed",
+        "The a16z Show": "https://feeds.megaphone.fm/HSM6258835768",   # 官方 Megaphone feed
+        "No Priors AI": "https://feeds.megaphone.fm/nopriors",
+        "Exponential View": "https://exponentialview.co/feed",
+    }
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.subheader("📻 Recent Episodes")
+        # 抓取每个播客的最新一期（或最近两期）
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        for show, rss_url in podcast_feeds.items():
+            st.markdown(f"**{show}**")
+            try:
+                feed = feedparser.parse(rss_url)
+                recent = []
+                for entry in feed.entries[:3]:
+                    pub_parsed = entry.get("published_parsed")
+                    if pub_parsed:
+                        pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
+                        if pub_dt < cutoff:
+                            continue
+                    recent.append((entry.title, entry.link, entry.get("published", "")))
+                if recent:
+                    for title, link, pub in recent[:2]:   # 每个播客最多显示2期
+                        st.markdown(f"- [{title}]({link}) ({pub})")
+                else:
+                    st.caption("No new episode in the last week.")
+            except Exception as e:
+                st.caption(f"Could not load feed: {e}")
+
+    with col2:
+        st.subheader("🔥 Trending on Product Hunt")
+        ph_rss = "https://www.producthunt.com/feed"
+        try:
+            ph_feed = feedparser.parse(ph_rss)
+            for entry in ph_feed.entries[:5]:
+                st.markdown(f"- [{entry.title}]({entry.link})")
+        except:
+            st.caption("Product Hunt data unavailable.")
+
+# ==================== TASK 6 (占位) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Check-in & Dashboard")
     st.info("We are currently refining this module. Please use your existing Numbers tracker for now. The full interactive version will be back soon!")
