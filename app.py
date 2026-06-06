@@ -91,14 +91,14 @@ task = st.sidebar.selectbox(
         "Task 2: Stock Indices",
         "Task 3: STM Industry News",
         "Task 4: Global Frontiers Update",
-        "Task 5: Tech Trends & Podcast",
+        "Task 5: Product Hunt",
         "Task 6: Daily Check-in & Dashboard (coming soon)",
     ],
 )
 
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
-    # ... (保持不变，你已满意)
+    # (保持不变)
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real news headline from BBC")
     bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
@@ -189,7 +189,7 @@ if task.startswith("Task 1"):
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
-    # ... (保持不变)
+    # (保持不变)
     st.subheader("📈 Major Stock Indices")
     st.caption(f"Latest data as of {today_date}")
 
@@ -251,7 +251,7 @@ elif task.startswith("Task 2"):
 
 # ==================== TASK 3 ====================
 elif task.startswith("Task 3"):
-    # ... (保持不变)
+    # (保持不变)
     st.subheader("🔬 STM Publishing Industry News (Last 7 Days)")
     rss_urls = [
         ("Scholarly Kitchen", "https://scholarlykitchen.sspnet.org/feed/"),
@@ -282,9 +282,9 @@ elif task.startswith("Task 3"):
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
-    st.subheader("🌍 Five Global Frontiers (Last 7 Days)")
+    st.subheader("🌍 Five Global Frontiers (Last 30 Days)")
     domain_rss = {
-        "AGI / AI Agents": [  # 改名并增加 MIT Technology Review
+        "AGI / AI Agents": [
             ("Synced Review", "https://syncedreview.com/feed/"),
             ("AI News", "https://www.artificialintelligence-news.com/feed/"),
             ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
@@ -307,7 +307,8 @@ elif task.startswith("Task 4"):
         ],
     }
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    # 30 天时效
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     if st.button("Fetch Latest Headlines"):
         with st.spinner("Fetching..."):
@@ -330,73 +331,49 @@ elif task.startswith("Task 4"):
                     except:
                         continue
                 if not found:
-                    st.caption("No recent headlines in the past 7 days.")
+                    st.caption("No recent headlines in the past 30 days.")
     else:
-        st.info("Click to fetch headlines for each frontier area (only past 7 days).")
+        st.info("Click to fetch headlines for each frontier area (past 30 days).")
 
-# ==================== TASK 5 ====================
+# ==================== TASK 5: Product Hunt ====================
 elif task.startswith("Task 5"):
-    st.subheader("🎙️ Latest Podcast Episodes & Product Hunt Trends")
-    st.caption("New episodes from your selected shows")
+    st.subheader("🔥 Trending on Product Hunt")
+    st.caption("Latest products with description and publish time")
 
-    # 播客 RSS 列表
-    podcast_feeds = {
-        "Hard Fork": "https://rss.art19.com/hard-fork",
-        "Latent Space": "https://www.latent.space/feed",
-        "The a16z Show": "https://feeds.megaphone.fm/HSM6258835768",
-        "No Priors AI": "https://feeds.megaphone.fm/nopriors",
-        "Exponential View": "https://exponentialview.co/feed",
-    }
+    ph_rss = "https://www.producthunt.com/feed"
 
-    def clean_summary(html_text):
-        """去除 HTML 标签，截取前 200 个字符"""
-        clean = re.sub(r'<[^>]+>', '', html_text)
-        return clean.strip()[:200]
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("📻 Recent Episodes")
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        for show, rss_url in podcast_feeds.items():
-            st.markdown(f"**{show}**")
+    if st.button("Refresh Product Hunt"):
+        with st.spinner("Fetching..."):
             try:
-                feed = feedparser.parse(rss_url)
-                recent = []
-                for entry in feed.entries[:3]:
-                    pub_parsed = entry.get("published_parsed")
-                    if pub_parsed:
-                        pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
-                        if pub_dt < cutoff:
-                            continue
-                    # 获取摘要
-                    summary = entry.get("summary") or entry.get("description") or ""
-                    summary_clean = clean_summary(summary)
-                    recent.append((entry.title, entry.link, entry.get("published", ""), summary_clean))
-                if recent:
-                    for title, link, pub, summary in recent[:2]:
-                        st.markdown(f"- [{title}]({link}) ({pub})")
-                        if summary:
-                            st.caption(f"_{summary}_")
-                else:
-                    st.caption("No new episode in the last week.")
-            except Exception as e:
-                st.caption(f"Could not load feed: {e}")
+                feed = feedparser.parse(ph_rss)
+                if feed.entries:
+                    for entry in feed.entries[:8]:   # 显示前8个
+                        title = entry.title
+                        link = entry.link
+                        # 发布时间：优先使用 published，其次 updated
+                        pub_time = entry.get("published", entry.get("updated", ""))
+                        # 简介：优先使用 summary，否则 description，去除 HTML
+                        raw_desc = entry.get("summary", entry.get("description", ""))
+                        clean_desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
+                        # 如果简介太长，截取前250字符
+                        if len(clean_desc) > 250:
+                            clean_desc = clean_desc[:250] + "..."
+                        # 过滤掉奇怪的字段，例如 "Discussion | Link"
+                        if "Discussion" in clean_desc and "Link" in clean_desc:
+                            clean_desc = ""  # 或者保留原标题
 
-    with col2:
-        st.subheader("🔥 Trending on Product Hunt")
-        ph_rss = "https://www.producthunt.com/feed"
-        try:
-            ph_feed = feedparser.parse(ph_rss)
-            for entry in ph_feed.entries[:5]:
-                st.markdown(f"- **[{entry.title}]({entry.link})**")
-                # 产品简介
-                desc = entry.get("summary") or entry.get("description") or ""
-                desc_clean = clean_summary(desc)
-                if desc_clean:
-                    st.caption(desc_clean)
-        except:
-            st.caption("Product Hunt data unavailable.")
+                        st.markdown(f"### [{title}]({link})")
+                        if pub_time:
+                            st.caption(f"🕒 {pub_time}")
+                        if clean_desc:
+                            st.markdown(clean_desc)
+                        st.markdown("---")
+                else:
+                    st.warning("No products found.")
+            except Exception as e:
+                st.error(f"Error fetching Product Hunt: {e}")
+    else:
+        st.info("Click to fetch the latest Product Hunt products.")
 
 # ==================== TASK 6 (占位) ====================
 elif task.startswith("Task 6"):
