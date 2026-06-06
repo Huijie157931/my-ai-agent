@@ -92,7 +92,7 @@ task = st.sidebar.selectbox(
         "Task 3: STM Industry News",
         "Task 4: Global Frontiers Update",
         "Task 5: Tech Trends & Podcast",
-        "Task 6: Daily Check-in & Dashboard",
+        "Task 6: Daily Check-in & Dashboard (coming soon)",
     ],
 )
 
@@ -258,7 +258,7 @@ elif task.startswith("Task 3"):
         ("COPE", "https://publicationethics.org/feed/"),
         ("SSP", "https://www.sspnet.org/feed/"),
     ]
-    if st.button("Summarize Latest News"):
+    if st.button("Fetch Latest News"):
         with st.spinner("Fetching..."):
             entries = []
             for src_name, url in rss_urls:
@@ -269,27 +269,13 @@ elif task.startswith("Task 3"):
                 except:
                     continue
             if entries:
-                combined_lines = []
+                st.markdown("**📡 Sources (click to read full article)**")
                 for src, title, link, pub in entries:
-                    combined_lines.append(f"Source: {src} | Title: {title} | Link: {link} | Date: {pub}")
-                combined = "\n".join(combined_lines)
-                prompt = (
-                    f"Today is {today_date}. Below are recent STM publishing news headlines from the last week. "
-                    "Write a concise summary in 3-4 bullet points. For each bullet, include the key point and cite the source name. "
-                    "Do not invent any information.\n\n{combined}"
-                )
-                try:
-                    resp = model.generate_content(prompt)
-                    st.markdown(resp.text)
-                    with st.expander("View all sources"):
-                        for src, title, link, pub in entries:
-                            st.markdown(f"- **{src}**: [{title}]({link}) ({pub})")
-                except Exception as e:
-                    st.error(f"Gemini error: {e}")
+                    st.markdown(f"- **{src}**: [{title}]({link}) ({pub})")
             else:
-                st.warning("Could not fetch any RSS feeds.")
+                st.warning("Could not fetch any RSS feeds. Please try again later.")
     else:
-        st.info("Click to generate summary.")
+        st.info("Click to fetch the latest STM publishing headlines (no AI summary).")
 
 # ==================== TASK 4 ====================
 elif task.startswith("Task 4"):
@@ -316,293 +302,64 @@ elif task.startswith("Task 4"):
             ("Fierce Biotech", "https://www.fiercebiotech.com/feed"),
         ],
     }
-    if st.button("Get Latest Milestones"):
-        with st.spinner("Aggregating..."):
-            all_domain_news = {}
+    if st.button("Fetch Latest Headlines"):
+        with st.spinner("Fetching..."):
             for domain, feeds in domain_rss.items():
-                headlines = []
+                st.markdown(f"### {domain}")
+                found = False
                 for src_name, url in feeds:
                     try:
                         feed = feedparser.parse(url)
                         for entry in feed.entries[:2]:
-                            headlines.append((src_name, entry.title, entry.link, entry.get("published","")))
+                            found = True
+                            st.markdown(f"- **{src_name}**: [{entry.title}]({entry.link}) ({entry.get('published','')})")
                     except:
                         continue
-                if headlines:
-                    all_domain_news[domain] = headlines
-            if not all_domain_news:
-                st.warning("No RSS feeds could be retrieved.")
-            else:
-                combined_for_prompt = []
-                for domain, items in all_domain_news.items():
-                    combined_for_prompt.append(f"**{domain}**")
-                    for src, title, link, pub in items:
-                        combined_for_prompt.append(f"- {src}: {title} ({pub}) Link: {link}")
-                input_text = "\n".join(combined_for_prompt)
-                prompt = (
-                    f"Today is {today_date}. Below are headlines from the last 7 days for five specific frontier areas. "
-                    "For each area, present 1-2 most important milestones in bullet points. Include the date and source. "
-                    "DO NOT fabricate.\n\n{input_text}"
-                )
-                try:
-                    resp = model.generate_content(prompt)
-                    st.markdown(resp.text)
-                    with st.expander("View all raw headlines"):
-                        for domain, items in all_domain_news.items():
-                            st.markdown(f"**{domain}**")
-                            for src, title, link, pub in items:
-                                st.markdown(f"- [{title}]({link}) ({src}, {pub})")
-                except Exception as e:
-                    st.error(f"Gemini error: {e}")
+                if not found:
+                    st.caption("No recent headlines available.")
     else:
-        st.info("Click to get frontier updates.")
+        st.info("Click to fetch headlines for each frontier area (no AI summary).")
 
 # ==================== TASK 5 ====================
 elif task.startswith("Task 5"):
     st.subheader("💡 Tech Trends & Podcast Recommendation")
     st.caption("Based on Product Hunt trending products")
     ph_rss = "https://www.producthunt.com/feed"
-    podcast_names = ["The a16z Show", "Exponential View", "Hard Fork", "Latent Space", "No Priors AI"]
     if st.button("Analyze & Recommend"):
         with st.spinner("Analyzing..."):
             ph_entries = []
             try:
                 feed = feedparser.parse(ph_rss)
                 for entry in feed.entries[:5]:
-                    ph_entries.append(f"{entry.title} – {entry.link}")
+                    ph_entries.append((entry.title, entry.link))
             except:
                 pass
-            ph_text = "\n".join(ph_entries) if ph_entries else "Product Hunt data unavailable."
-            prompt = (
-                f"Today is {today_date}. Based on the following Product Hunt trending products, identify the top 2-3 tech/AI trends this week. "
-                "Present as bullet points. Then, choose one podcast from this list: The a16z Show, Exponential View, Hard Fork, Latent Space, No Priors AI "
-                "that best matches the current trend. Explain your choice in one sentence. "
-                "IMPORTANT: Do not fabricate episode names or links. If you cannot verify, say 'I recommend checking the latest episode of [Podcast]' without a link.\n\n"
-                f"Product Hunt:\n{ph_text}"
-            )
-            try:
-                resp = model.generate_content(prompt)
-                st.markdown(resp.text)
-            except Exception as e:
-                st.error(f"API error: {e}")
+            if ph_entries:
+                ph_lines = [f"- [{title}]({link})" for title, link in ph_entries]
+                ph_text = "\n".join(ph_lines)
+                prompt = (
+                    f"Today is {today_date}. Below are the trending products on Product Hunt:\n{ph_text}\n\n"
+                    "Based on these products, identify the top 2-3 tech/AI trends this week. List them as bullet points with a brief explanation. "
+                    "Then, recommend ONE podcast episode from this list: The a16z Show, Exponential View, Hard Fork, Latent Space, No Priors AI "
+                    "that best matches these trends. Provide the podcast name, the specific episode title (if you can find a recent relevant one), "
+                    "a direct listen link (or a search URL like 'https://www.google.com/search?q=Hard+Fork+latest+episode'), and a one‑sentence reason for the recommendation. "
+                    "Do NOT fabricate episode details. If unsure, say 'I recommend checking the latest episode of [Podcast]' and provide the podcast's official website."
+                )
+                try:
+                    resp = model.generate_content(prompt)
+                    st.markdown(resp.text)
+                except Exception as e:
+                    st.error(f"Gemini error: {e}")
+                # 同时显示 Product Hunt 来源
+                st.markdown("**🔗 Trending on Product Hunt (source)**")
+                for title, link in ph_entries:
+                    st.markdown(f"- [{title}]({link})")
+            else:
+                st.warning("Product Hunt data unavailable.")
     else:
-        st.info("Click to get trend analysis and podcast recommendation.")
+        st.info("Click to analyze trends and get a podcast recommendation.")
 
-# ==================== TASK 6 ====================
+# ==================== TASK 6 (简化占位) ====================
 elif task.startswith("Task 6"):
-    st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption(f"{today_date}")
-
-    # ---------- 内置完整活动定义（来自你的CSV）----------
-    default_activities = [
-        {"name": "Food & Water & Self care", "category": "B", "budget": 330},
-        {"name": "Energy, Focus and Emotion", "category": "B", "budget": 280},
-        {"name": "Basic Exercise", "category": "B", "budget": 365},
-        {"name": "Foot step", "category": "B", "budget": 200},
-        {"name": ">.5hour MAG", "category": "M", "budget": 300},
-        {"name": ">.5hour books", "category": "M", "budget": 300},
-        {"name": "Meditation", "category": "V", "budget": 365},
-        {"name": "Sketch", "category": "V", "budget": 365},
-        {"name": "Life Admin", "category": "V", "budget": 53},
-        {"name": "Learn sth new", "category": "M", "budget": 50},
-        {"name": "Movie", "category": "M", "budget": 54},
-        {"name": "Extra Exercise", "category": "B", "budget": 200},
-        {"name": "Monthly review", "category": "V", "budget": 12},
-        {"name": "Invest", "category": "M", "budget": 12},
-        {"name": "Play/Exhibits/lecture", "category": "M", "budget": 25},
-        {"name": "Meet new people", "category": "E", "budget": 25},
-        {"name": "Deep exposure to nature", "category": "E", "budget": 15},
-        {"name": "Quarterly Review", "category": "V", "budget": 4},
-        {"name": "CV & Jobs", "category": "M", "budget": 6},
-        {"name": "Yearly Review + Plan", "category": "V", "budget": 2},
-        {"name": "Annual leave", "category": "V", "budget": 20},
-        {"name": "Family Gathering", "category": "E", "budget": 20},
-        {"name": "Health Check", "category": "B", "budget": 8},
-        {"name": "Extensive Journey (km)", "category": "B", "budget": 7},
-        {"name": "People", "category": "E", "budget": 300},
-        {"name": "Give back", "category": "V", "budget": 100},
-        {"name": "Engage. Get buy in. Inspire.", "category": "E", "budget": 225},
-        {"name": "Seek for help", "category": "E", "budget": 200},
-        {"name": "Confident & Brave", "category": "E", "budget": 120},
-        {"name": "Storytelling/talkative", "category": "M", "budget": 100},
-        {"name": "AI", "category": "M", "budget": 200},
-        {"name": "Growth Mindset", "category": "V", "budget": 330},
-    ]
-
-    # 初始化 session_state
-    if "activities" not in st.session_state:
-        st.session_state.activities = default_activities[:]
-    if "df_hist" not in st.session_state:
-        # 内置演示数据（Jan 1-10 的 X 标记，已转成记录）
-        demo_records = []
-        month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
-        demo_csv = [
-            ["Jan","1","X","X","X","","X","X","X","X","","","","","","","","","","","","","","","","","","","","","X","","","","X","X","X","X","","","","","","","","X"],
-            ["Jan","2","X","X","","","X","X","X","X","","","","","","","","","","","","","","","","","","","","X","X","","","","X","","","X","X","","","","","","","X"],
-            ["Jan","3","X","X","X","","X","X","X","X","","","","","","","","","","","","","","","","","","","","X","","","","","","","X","","","","","X","","","","","","",""],
-            ["Jan","4","X","X","X","X","X","X","X","X","","","","","","","","","","","","","","","","","","","","","","","","","","","X","","","X","","","","","","","","",""],
-            ["Jan","5","X","X","X","X","X","","X","X","","","","","","","","","","","","","","","","","","","","","","","","","","","X","","","X","","","","","","","X","X"],
-            ["Jan","6","X","X","X","X","X","","X","X","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","X","X","","","","X","X"],
-            ["Jan","7","","X","X","","X","","X","X","","","","","","","","","","","","","","","","","","","","","","","","","","","X","X","X","","","X","","","","","","X"],
-            ["Jan","8","X","","X","X","X","","X","X","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","X","X","","","","X"],
-            ["Jan","9","X","X","X","X","","","X","X","","","","","","","","","","","","","","","","","","","","","","X","","","","X","","","","X","","","","","","","","",""],
-            ["Jan","10","X","","X","","","","X","X","X","","","","","","","","","","","","","","","","","","","","","","X","","","","X","X","","","","","","","","","","",""],
-        ]
-        for row in demo_csv:
-            month = month_map.get(row[0])
-            if not month:
-                continue
-            day = int(row[1])
-            record_date = date(date.today().year, month, day)
-            for idx, act in enumerate(default_activities):
-                col_idx = idx + 2
-                if col_idx < len(row):
-                    val = row[col_idx].strip()
-                    if val.upper() == "X":
-                        achieved = 1.0
-                    elif val.replace(".","",1).isdigit():
-                        achieved = float(val)
-                    else:
-                        achieved = 0.0
-                    demo_records.append({
-                        "date": record_date,
-                        "activity": act["name"],
-                        "category": act["category"],
-                        "achieved": achieved,
-                        "budget": act["budget"]
-                    })
-        df = pd.DataFrame(demo_records)
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-        st.session_state.df_hist = df
-
-    activities = st.session_state.activities
-    df_hist = st.session_state.df_hist
-
-    # ---------- 打卡界面 ----------
-    st.markdown("### 📅 Select Date for Check-in")
-    selected_date = st.date_input("Pick a date", date.today())
-    st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
-    day_records = df_hist[df_hist["date"] == selected_date] if not df_hist.empty else pd.DataFrame()
-
-    col_cat = {"B": "🟢 Body", "V": "🟣 Value", "M": "🔵 Mental", "E": "🔴 Emotion"}
-    categories = ["B","V","M","E"]
-    updated_entries = {}
-    for cat in categories:
-        st.markdown(f"**{col_cat[cat]}**")
-        cat_acts = [a for a in activities if a["category"] == cat]
-        cols = st.columns(len(cat_acts))
-        for i, act in enumerate(cat_acts):
-            key = f"{act['name']}_{selected_date}"
-            existing = day_records[day_records["activity"] == act["name"]] if not day_records.empty else pd.DataFrame()
-            current_val = existing["achieved"].values[0] if not existing.empty else 0.0
-            checked = cols[i].checkbox(act["name"], value=(current_val > 0), key=key)
-            updated_entries[act["name"]] = 1.0 if checked else 0.0
-
-    if st.button("💾 Save Check-in for this date"):
-        df_hist = df_hist[df_hist["date"] != selected_date] if not df_hist.empty else df_hist
-        new_rows = []
-        for act in activities:
-            new_rows.append({
-                "date": selected_date,
-                "activity": act["name"],
-                "category": act["category"],
-                "achieved": updated_entries[act["name"]],
-                "budget": act["budget"]
-            })
-        df_new = pd.DataFrame(new_rows)
-        df_hist = pd.concat([df_hist, df_new], ignore_index=True)
-        df_hist["date"] = pd.to_datetime(df_hist["date"]).dt.date
-        st.session_state.df_hist = df_hist
-        st.success("Check-in saved!")
-        st.rerun()
-
-    # ---------- YTD 进度 ----------
-    st.markdown("### 📊 Year-to-Date Progress")
-    if not df_hist.empty:
-        ytd = df_hist[df_hist["date"].apply(lambda x: x.year == date.today().year)]
-        if not ytd.empty:
-            days_passed = (date.today() - date(date.today().year,1,1)).days + 1
-            progress_rows = []
-            for act in activities:
-                name = act["name"]
-                budget = act["budget"]
-                actual = ytd[ytd["activity"] == name]["achieved"].sum()
-                expected = round(budget * days_passed / 365, 1)
-                actual_ratio = actual / budget if budget > 0 else 0
-                if actual >= expected:
-                    status = "On Track"
-                elif actual >= expected * 0.8:
-                    status = "Slightly Behind"
-                else:
-                    status = "Behind"
-                progress_rows.append({
-                    "Category": act["category"],
-                    "Activity": name,
-                    "Annual Target": int(round(budget)),
-                    "Actual YTD": int(round(actual)),
-                    "Expected YTD": int(round(expected)),
-                    "Progress %": f"{actual_ratio:.1%}",
-                    "Status": status
-                })
-            df_progress = pd.DataFrame(progress_rows)
-
-            def status_color(val):
-                if val == "On Track":
-                    return "background-color: #d4edda; color: #155724"
-                elif val == "Slightly Behind":
-                    return "background-color: #fff3cd; color: #856404"
-                else:
-                    return "background-color: #f8d7da; color: #721c24"
-
-            styled = df_progress.style.map(status_color, subset=["Status"])
-            st.dataframe(styled, use_container_width=True)
-
-            st.markdown("**Category Totals**")
-            cat_summary = []
-            for cat in categories:
-                cat_acts = [a for a in activities if a["category"] == cat]
-                if cat_acts:
-                    total_budget = sum(a["budget"] for a in cat_acts)
-                    total_actual = sum(ytd[ytd["activity"] == a["name"]]["achieved"].sum() for a in cat_acts)
-                    expected_cat = total_budget * days_passed / 365
-                    cat_status = "On Track" if total_actual >= expected_cat else "Behind"
-                    cat_summary.append({
-                        "Category": cat,
-                        "Total Target": int(round(total_budget)),
-                        "Actual": int(round(total_actual)),
-                        "Expected": int(round(expected_cat)),
-                        "Progress %": f"{total_actual / total_budget:.1%}" if total_budget > 0 else "0%",
-                        "Status": cat_status
-                    })
-            df_cat = pd.DataFrame(cat_summary)
-            styled_cat = df_cat.style.map(
-                lambda val: "background-color: #d4edda; color: #155724" if val == "On Track" else "background-color: #f8d7da; color: #721c24",
-                subset=["Status"]
-            )
-            st.dataframe(styled_cat, use_container_width=True)
-        else:
-            st.info("No data for current year yet.")
-    else:
-        st.info("No activity data loaded. Start checking in!")
-
-    # ---------- 编辑 Budget ----------
-    st.markdown("### ✏️ Edit Annual Budget")
-    if activities:
-        selected_activity = st.selectbox("Select activity to modify:", [a["name"] for a in activities])
-        current_budget = next((a["budget"] for a in activities if a["name"] == selected_activity), 0)
-        new_budget = st.number_input(f"New budget for {selected_activity}", value=int(current_budget), min_value=0)
-        if st.button("Update Budget"):
-            # 更新 activities 中的 budget
-            for a in activities:
-                if a["name"] == selected_activity:
-                    a["budget"] = float(new_budget)
-                    break
-            # 同步历史记录
-            if not df_hist.empty:
-                mask = df_hist["activity"] == selected_activity
-                df_hist.loc[mask, "budget"] = float(new_budget)
-                st.session_state.df_hist = df_hist
-            st.session_state.activities = activities
-            st.success(f"Budget updated to {new_budget}.")
-            st.rerun()
+    st.subheader("🏋️ Daily Check-in & Dashboard")
+    st.info("We are currently refining this module. Please use your existing Numbers tracker for now. The full interactive version will be back soon!")
