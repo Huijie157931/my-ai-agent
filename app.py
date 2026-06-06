@@ -280,7 +280,7 @@ elif task.startswith("Task 3"):
     else:
         st.info("Click to fetch the latest STM publishing headlines.")
 
-# ==================== TASK 4 ====================
+# ==================== TASK 4 (30 days, show all recent entries) ====================
 elif task.startswith("Task 4"):
     st.subheader("🌍 Five Global Frontiers (Last 30 Days)")
     domain_rss = {
@@ -307,38 +307,39 @@ elif task.startswith("Task 4"):
         ],
     }
 
-    # 30 天时效
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     if st.button("Fetch Latest Headlines"):
         with st.spinner("Fetching..."):
             for domain, feeds in domain_rss.items():
                 st.markdown(f"### {domain}")
-                found = False
+                found_any = False
                 for src_name, url in feeds:
                     try:
                         feed = feedparser.parse(url)
-                        for entry in feed.entries[:3]:
+                        count = 0
+                        for entry in feed.entries:
                             pub_parsed = entry.get("published_parsed")
                             if pub_parsed:
                                 pub_dt = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
                                 if pub_dt < cutoff:
                                     continue
-                            found = True
+                            found_any = True
                             st.markdown(f"- **{src_name}**: [{entry.title}]({entry.link}) ({entry.get('published','')})")
-                            if found:
+                            count += 1
+                            if count >= 3:  # 每个源最多显示3条
                                 break
                     except:
                         continue
-                if not found:
+                if not found_any:
                     st.caption("No recent headlines in the past 30 days.")
     else:
         st.info("Click to fetch headlines for each frontier area (past 30 days).")
 
-# ==================== TASK 5: Product Hunt ====================
+# ==================== TASK 5: Product Hunt (top 5, compact) ====================
 elif task.startswith("Task 5"):
     st.subheader("🔥 Trending on Product Hunt")
-    st.caption("Latest products with description and publish time")
+    st.caption("Latest 5 products with description and time")
 
     ph_rss = "https://www.producthunt.com/feed"
 
@@ -347,27 +348,30 @@ elif task.startswith("Task 5"):
             try:
                 feed = feedparser.parse(ph_rss)
                 if feed.entries:
-                    for entry in feed.entries[:8]:   # 显示前8个
+                    # 只显示前 5 个
+                    for i, entry in enumerate(feed.entries[:5]):
                         title = entry.title
                         link = entry.link
-                        # 发布时间：优先使用 published，其次 updated
+                        # 发布时间
                         pub_time = entry.get("published", entry.get("updated", ""))
-                        # 简介：优先使用 summary，否则 description，去除 HTML
+                        # 简介
                         raw_desc = entry.get("summary", entry.get("description", ""))
                         clean_desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
-                        # 如果简介太长，截取前250字符
-                        if len(clean_desc) > 250:
-                            clean_desc = clean_desc[:250] + "..."
-                        # 过滤掉奇怪的字段，例如 "Discussion | Link"
-                        if "Discussion" in clean_desc and "Link" in clean_desc:
-                            clean_desc = ""  # 或者保留原标题
+                        # 过滤掉 Discussion | Link 等元数据噪音
+                        if clean_desc.startswith("Discussion") and "Link" in clean_desc and len(clean_desc) < 80:
+                            clean_desc = ""
+                        # 截取合适长度
+                        if len(clean_desc) > 200:
+                            clean_desc = clean_desc[:200] + "..."
 
-                        st.markdown(f"### [{title}]({link})")
+                        # 使用更小的标题和段落
+                        st.markdown(f"#### [{title}]({link})")
                         if pub_time:
                             st.caption(f"🕒 {pub_time}")
                         if clean_desc:
                             st.markdown(clean_desc)
-                        st.markdown("---")
+                        if i < 4:  # 最后一个不加分割线
+                            st.markdown("---")
                 else:
                     st.warning("No products found.")
             except Exception as e:
