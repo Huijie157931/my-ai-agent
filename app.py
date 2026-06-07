@@ -397,9 +397,9 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically to the cloud database. Click 'Refresh Data' if numbers seem stale.")
+    st.caption("All changes are saved automatically to the cloud database. Numbers update immediately after saving.")
 
-    # ---------- 辅助函数（全部无缓存）----------
+    # ---------- 辅助函数（无缓存，每次实时查询）----------
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
@@ -494,11 +494,7 @@ elif task.startswith("Task 6"):
                 "achieved": rec["achieved"]
             }, on_conflict="checkin_date, activity_id").execute()
 
-    # ---------- 强制刷新按钮 ----------
-    if st.sidebar.button("🔄 Refresh Data from Database"):
-        st.rerun()
-
-    # ---------- 加载活动（实时）----------
+    # ---------- 加载活动列表 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
         st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
@@ -527,13 +523,14 @@ elif task.startswith("Task 6"):
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
 
-    # 直接查询该日期记录
+    # 实时查询该日期打卡记录
     checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
     day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
 
     col_cat = {"B": "🟢 Body", "V": "🟣 Value", "M": "🔵 Mental", "E": "🔴 Emotion"}
     categories = ["B","V","M","E"]
     updated_entries = {}
+    total_checked = 0
     for cat in categories:
         st.markdown(f"**{col_cat[cat]}**")
         cat_acts = [a for a in activities if a["category"] == cat]
@@ -542,6 +539,11 @@ elif task.startswith("Task 6"):
             current_val = day_map.get(act["id"], 0)
             checked = cols[i].checkbox(act["name"], value=(current_val > 0), key=f"{act['id']}_{selected_date}")
             updated_entries[act["id"]] = 1.0 if checked else 0.0
+            if checked:
+                total_checked += 1
+
+    # 今日打卡计数
+    st.markdown(f"**✅ Today's check-in count: {total_checked} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
         for act_id, achieved in updated_entries.items():
@@ -553,9 +555,11 @@ elif task.startswith("Task 6"):
                     "achieved": achieved
                 }).execute()
         st.success("Check-in saved! Dashboard will now update.")
+        # 确保数据库写入完成
+        time.sleep(0.5)
         st.rerun()
 
-    # ---------- YTD 看板（实时查询）----------
+    # ---------- YTD 看板（实时查询，无缓存）----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
@@ -642,7 +646,7 @@ elif task.startswith("Task 6"):
             st.success(f"Budget updated!")
             st.rerun()
 
-    # ---------- 上传 CSV 批量导入 ----------
+    # ---------- 批量上传 CSV ----------
     st.markdown("### 📤 Upload CSV to Import / Update History")
     st.caption("Re-upload your CSV any time. Duplicate dates will be updated, not added.")
     uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
