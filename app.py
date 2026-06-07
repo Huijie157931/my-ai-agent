@@ -693,16 +693,17 @@ elif task.startswith("Task 6"):
             st.success("Updated!")
             st.rerun()
 
-    # ---------- 导入历史数据 ----------
+    # ---------- 导入历史数据（先清空再导入）----------
     st.markdown("### 📤 Import History from Data-Only CSV")
-    st.caption("Upload your data CSV (dates in first column, 32 data columns). Extra columns will be ignored.")
+    st.caption("Upload your data CSV (dates in first column, 32 data columns). Extra columns will be ignored. All previous check-ins will be replaced.")
     with st.form("reimport"):
         up_hist = st.file_uploader("Upload Data CSV", type="csv")
         if st.form_submit_button("Import History") and up_hist is not None:
             hist = parse_data_csv(up_hist)
-            if hist is not None:
+            if hist:
+                # 删除所有旧记录，防止旧的不完整数据残留
+                supabase.table("checkins").delete().neq("id", 0).execute()
                 import_history(hist)
-                st.success(f"Imported {len(hist)} records.")
                 st.rerun()
 
     # ---------- 导出 ----------
