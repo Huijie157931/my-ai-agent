@@ -108,34 +108,29 @@ if task.startswith("Task 1"):
     st.subheader("📰 Today’s German Learning Sentence")
     st.caption("Based on a real headline from Die Zeit · Free API: 20 requests/day")
 
-    # 使用 session_state 保持标题稳定
-    if "zeit_headline" not in st.session_state:
+    if st.button("Generate Today's Sentence"):
+        # 每次点击重新抓取一条新标题
         zeit_rss = "https://newsfeed.zeit.de/all"
+        news_title = ""
+        news_link = ""
         try:
             feed = feedparser.parse(zeit_rss)
             if feed.entries:
                 chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
-                st.session_state.zeit_headline = chosen.title
-                st.session_state.zeit_link = chosen.link
-            else:
-                st.session_state.zeit_headline = "Unable to fetch news"
-                st.session_state.zeit_link = ""
+                news_title = chosen.title
+                news_link = chosen.link
         except:
-            st.session_state.zeit_headline = "Unable to fetch news"
-            st.session_state.zeit_link = ""
+            news_title = "Unable to fetch news"
+            news_link = ""
 
-    news_title = st.session_state.zeit_headline
-    news_link = st.session_state.zeit_link
+        if news_title and news_title != "Unable to fetch news":
+            st.markdown(f"**📌 Today's headline (German):** {news_title}")
+            if news_link:
+                st.markdown(f"[🔗 Read full article]({news_link})")
+        else:
+            st.warning("Could not fetch latest news. Using generic prompt.")
 
-    if news_title and news_title != "Unable to fetch news":
-        st.markdown(f"**📌 Today's headline (German):** {news_title}")
-        if news_link:
-            st.markdown(f"[🔗 Read full article]({news_link})")
-    else:
-        st.warning("Could not fetch latest news. Using generic prompt.")
-
-    if st.button("Generate Explanation"):
-        with st.spinner("Generating..."):
+        with st.spinner("Generating explanation..."):
             prompt = (
                 f"The German news headline is: '{news_title}'. "
                 "Please provide:\n"
@@ -203,8 +198,7 @@ if task.startswith("Task 1"):
                 else:
                     st.error(f"API error: {e}")
     else:
-        st.info("Click to get English translation, vocabulary, and grammar explanation for the German headline.")
-
+        st.info("Click 'Generate Today's Sentence' to get a new headline from Die Zeit with translation, vocabulary, and grammar.")
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
     st.subheader("📈 Major Stock Indices")
