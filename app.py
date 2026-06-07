@@ -397,7 +397,17 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically. If numbers seem off, just refresh the page.")
+    st.caption("All changes are saved automatically. Data will not change on refresh.")
+
+    # ---------- 确保唯一约束 ----------
+    try:
+        supabase.rpc("create_checkins_unique", {})  # 尝试调用一个自定义函数（如果已创建会报错）
+    except:
+        # 直接通过 SQL 创建唯一约束（若已存在则忽略）
+        try:
+            supabase.sql("ALTER TABLE checkins ADD CONSTRAINT IF NOT EXISTS checkins_date_activity_unique UNIQUE (checkin_date, activity_id);")
+        except:
+            pass
 
     # ---------- 辅助函数（无缓存）----------
     def load_activities_from_db():
@@ -480,36 +490,44 @@ elif task.startswith("Task 6"):
     def import_history(history_list):
         if not history_list:
             return
+        # 获取活动名称到 ID 的映射
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
+        
+        # 收集所有需要导入的日期，并先删除这些日期的旧记录（批量删除）
+        dates_set = {rec["date"].isoformat() for rec in history_list}
+        for d_str in dates_set:
+            supabase.table("checkins").delete().eq("checkin_date", d_str).execute()
+        
+        # 插入新记录
         for rec in history_list:
             act_name = rec["activity_name"]
             if act_name not in name_to_id:
                 continue
             act_id = name_to_id[act_name]
-            supabase.table("checkins").upsert({
+            supabase.table("checkins").insert({
                 "checkin_date": rec["date"].isoformat(),
                 "activity_id": act_id,
                 "achieved": rec["achieved"]
-            }, on_conflict="checkin_date, activity_id").execute()
+            }).execute()
 
-    # ---------- 初始化：如果数据库中没有活动，要求上传 CSV ----------
+    # ---------- 加载活动 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
         st.warning("No activities found. Please upload your CSV to initialize the tracker.")
-        uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
-        if st.button("Initialize Tracker", key="init_btn"):
-            if uploaded is None:
+        uploaded_init = st.file_uploader("Upload CSV", type="csv", key="init_upload")
+        if st.button("Initialize Tracker"):
+            if uploaded_init is None:
                 st.error("Please select a CSV file first.")
             else:
-                acts, hist = parse_csv_v2(uploaded)
+                acts, hist = parse_csv_v2(uploaded_init)
                 if acts is None:
                     st.stop()
                 init_activities_from_list(acts)
                 import_history(hist)
-                # 清除上传组件，防止下次刷新重复导入
+                # 清除上传组件状态
                 st.session_state.pop("init_upload", None)
-                st.success(f"Tracker initialized! {len(acts)} activities, {len(hist)} history records imported.")
+                st.success(f"Tracker initialized! {len(acts)} activities, {len(hist)} history records.")
                 st.rerun()
         st.stop()
 
@@ -559,7 +577,7 @@ elif task.startswith("Task 6"):
                     "achieved": achieved
                 }).execute()
         st.success("Saved! Dashboard updated.")
-        time.sleep(0.5)
+        time.sleep(0.3)
         st.rerun()
 
     # ---------- YTD 看板（实时查询）----------
@@ -649,20 +667,19 @@ elif task.startswith("Task 6"):
             st.success("Budget updated!")
             st.rerun()
 
-    # ---------- 重新导入 CSV（需要手动点击按钮）----------
+    # ---------- 重新导入 CSV（按钮触发，先删除旧数据）----------
     st.markdown("### 📤 Re-import History from CSV")
-    st.caption("Upload a CSV and click the button below to replace all history data.")
+    st.caption("Upload a CSV and click the button to replace all history for the dates in the file.")
     uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
-    if st.button("Import History", key="import_history_btn"):
+    if st.button("Import History"):
         if uploaded_history is None:
             st.error("Please select a CSV file first.")
         else:
             acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
             if acts_parsed is None:
                 st.stop()
-            init_activities_from_list(acts_parsed)   # 确保活动存在
+            init_activities_from_list(acts_parsed)
             import_history(hist_parsed)
-            # 清除上传组件，防止下次刷新重复导入
             st.session_state.pop("history_upload", None)
             st.success(f"History imported! {len(hist_parsed)} records upserted. Dashboard updated.")
             st.rerun()
