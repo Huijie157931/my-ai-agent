@@ -405,14 +405,20 @@ elif task.startswith("Task 6"):
     except:
         pass
 
-    # ---------- 工具函数 ----------
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
             return pd.DataFrame(res.data)
         return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
-    def parse_csv_v3(uploaded_file):
+    def parse_original_csv(uploaded_file):
+        """解析你的原始 CSV 格式：
+           第0行：标签 'MEVB Category' + 类别字母 (B,V,M,E)
+           第1行：标签 'Activity' + 活动名称
+           第2行：标签 'BUDGET' + 预算数值
+           第3行及以后：标签 'Jan 1' 等 + 完成的标志 (X/1/数字)
+           活动数据从每行的第1列开始（索引1）
+        """
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.reader(io.StringIO(content))
         rows = list(reader)
@@ -420,65 +426,34 @@ elif task.startswith("Task 6"):
             st.error("CSV must have at least 4 rows (Category, Activity, Budget, data).")
             return None, None
 
-        # 找到 Category 行（包含 B、V、M、E 任意一个即认定）
-        cat_idx = None
-        for i, r in enumerate(rows):
-            if any(cell.strip() in ("B","V","M","E") for cell in r):
-                cat_idx = i
-                break
-        if cat_idx is None:
-            st.error("Cannot find Category row in CSV.")
-            return None, None
+        cat_row = rows[0]   # 第一行
+        act_row = rows[1]   # 第二行
+        budget_row = rows[2]  # 第三行
 
-        act_idx = cat_idx + 1
-        budget_idx = act_idx + 1
-        if budget_idx >= len(rows):
-            st.error("CSV is missing Budget row.")
-            return None, None
-
-        cat_row = rows[cat_idx]
-        act_row = rows[act_idx]
-        budget_row = rows[budget_idx]
-
-        # 找出第一个类别为 B/V/M/E 的列索引
-        start_col = 0
-        for i in range(len(act_row)):
-            if i < len(cat_row) and cat_row[i].strip() in ("B","V","M","E"):
-                start_col = i
-                break
-
-        # 解析活动列表（从 start_col 开始，直到碰到连续的空列为止）
+        # 从索引1开始解析活动（索引0是标签列）
         activities = []
-        consecutive_empty = 0
-        for i in range(start_col, len(act_row)):
-            if i >= len(cat_row):
-                break
-            cat = cat_row[i].strip()
-            name = act_row[i].strip()
+        for i in range(1, len(act_row)):
+            cat = cat_row[i].strip() if i < len(cat_row) else ""
+            name = act_row[i].strip() if i < len(act_row) else ""
             if cat in ("B","V","M","E") and name:
                 try:
                     budget = float(budget_row[i].strip()) if i < len(budget_row) else 0.0
                 except:
                     budget = 0.0
                 activities.append({"name": name, "category": cat, "budget": budget})
-                consecutive_empty = 0
-            else:
-                consecutive_empty += 1
-                if consecutive_empty >= 3:  # 连续3个空列视为活动结束
-                    break
 
         if not activities:
             st.error("No activities found. Check CSV structure.")
             return None, None
 
-        # 解析历史数据
+        # 解析历史数据（从第3行索引3开始）
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
         history = []
-        for row in rows[budget_idx+1:]:
+        for row in rows[3:]:
             if len(row) < 2:
                 continue
-            date_str = row[0].strip()
+            date_str = row[0].strip()   # 索引0是日期
             if not date_str:
                 continue
             parts = date_str.split()
@@ -494,7 +469,7 @@ elif task.startswith("Task 6"):
                 continue
             record_date = date(date.today().year, month, day)
             for idx, act in enumerate(activities):
-                col = start_col + idx
+                col = idx + 1   # 活动从索引1开始
                 if col < len(row):
                     val = row[col].strip().upper()
                     if val in ("X", "1"):
@@ -522,10 +497,8 @@ elif task.startswith("Task 6"):
     def import_history(history_list):
         if not history_list:
             return
-        # 获取活动名到ID的映射
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
-        # 按日期分组
         from collections import defaultdict
         date_map = defaultdict(list)
         for rec in history_list:
@@ -536,7 +509,6 @@ elif task.startswith("Task 6"):
                 "activity_id": name_to_id[act_name],
                 "achieved": rec["achieved"]
             })
-        # 对每个日期先删后插
         for d_str, entries in date_map.items():
             supabase.table("checkins").delete().eq("checkin_date", d_str).execute()
             for e in entries:
@@ -557,12 +529,8 @@ elif task.startswith("Task 6"):
                 if uploaded_init is None:
                     st.error("Please select a CSV file first.")
                 else:
-                    acts, hist = parse_csv_v3(uploaded_init)
+                    acts, hist = parse_original_csv(uploaded_init)
                     if acts is None:
-                        st.stop()
-                    # 校验活动数量（你的文件应有 32 个活动）
-                    if len(acts) != 32:
-                        st.warning(f"Parsed {len(acts)} activities (expected 32). Please check your CSV and try again.")
                         st.stop()
                     init_activities_from_list(acts)
                     import_history(hist)
@@ -570,7 +538,6 @@ elif task.startswith("Task 6"):
                     st.rerun()
         st.stop()
 
-    # 正常加载活动
     activities = []
     for _, row in df_activities.iterrows():
         activities.append({
@@ -580,7 +547,7 @@ elif task.startswith("Task 6"):
             "budget": row["budget"]
         })
 
-    # ---------- 打卡界面 ----------
+    # ---------- 打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
@@ -704,7 +671,7 @@ elif task.startswith("Task 6"):
             st.success("Budget updated!")
             st.rerun()
 
-    # ---------- 重新导入 CSV ----------
+    # ---------- 重新导入 ----------
     st.markdown("### 📤 Re-import History from CSV")
     with st.form("reimport_form"):
         uploaded_history = st.file_uploader("Upload CSV", type="csv")
@@ -713,7 +680,7 @@ elif task.startswith("Task 6"):
         if uploaded_history is None:
             st.error("Please select a CSV file first.")
         else:
-            acts_parsed, hist_parsed = parse_csv_v3(uploaded_history)
+            acts_parsed, hist_parsed = parse_original_csv(uploaded_history)
             if acts_parsed is None:
                 st.stop()
             init_activities_from_list(acts_parsed)
