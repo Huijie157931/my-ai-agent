@@ -502,7 +502,11 @@ elif task.startswith("Task 6"):
                 })
         return history
 
-    def import_history(hist_list):
+        def import_history(hist_list):
+        """
+        FIX: Supabase silently truncates upserts at ~1000 rows.
+        Now batch records into chunks of 500.
+        """
         if not hist_list:
             return
         res = supabase.table("activities").select("id, name").execute()
@@ -517,8 +521,25 @@ elif task.startswith("Task 6"):
                 "activity_id": act_id,
                 "achieved": rec["achieved"],
             })
-        if records:
-            supabase.table("checkins").upsert(records, on_conflict="checkin_date,activity_id").execute()
+        if not records:
+            return
+
+        # 分批导入
+        BATCH_SIZE = 500
+        total_batches = (len(records) + BATCH_SIZE - 1) // BATCH_SIZE
+        progress = st.progress(0, text="Importing records…")
+
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i: i + BATCH_SIZE]
+            supabase.table("checkins").upsert(
+                batch, on_conflict="checkin_date,activity_id"
+            ).execute()
+            pct = min((i + BATCH_SIZE) / len(records), 1.0)
+            batch_num = i // BATCH_SIZE + 1
+            progress.progress(pct, text=f"Importing batch {batch_num}/{total_batches}…")
+
+        progress.empty()
+        st.success(f"✅ Imported {len(records)} records in {total_batches} batches.")
 
     # ---------- 保证活动已初始化 ----------
     df_act = supabase.table("activities").select("*").order("id").execute()
