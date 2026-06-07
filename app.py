@@ -400,7 +400,7 @@ elif task.startswith("Task 6"):
     st.caption("All changes are saved automatically to the cloud database.")
 
     # ---------- 辅助函数 ----------
-    @st.cache_data(ttl=2)
+    # 注意：不加任何缓存，保证数据实时
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
@@ -409,7 +409,7 @@ elif task.startswith("Task 6"):
             return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
     def parse_csv_to_activities_and_history(uploaded_file):
-        """返回 activities 列表 (dict) 和 history 列表 (dict)"""
+        """返回 activities 列表 (dict) 和 history 列表 (dict)，名称已 trim"""
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.reader(content.splitlines())
         lines = list(reader)
@@ -417,16 +417,11 @@ elif task.startswith("Task 6"):
             st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
             return None, None
 
-        # 第一行：Day, Daily, ... (列头)
-        # 第二行：Category (B, V, M, E)
         cat_line = lines[1]
-        # 第三行：Activity 名称
         act_line = lines[2]
-        # 第四行：Target
         tgt_line = lines[3] if len(lines) > 3 else []
 
         activities = []
-        # 解析活动（从索引1开始，第0列是 "Day" 或标签）
         for i in range(1, len(act_line)):
             cat = cat_line[i].strip() if i < len(cat_line) else ""
             name = act_line[i].strip() if i < len(act_line) else ""
@@ -438,11 +433,10 @@ elif task.startswith("Task 6"):
                     budget = 0.0
                 activities.append({"name": name, "category": cat, "budget": budget})
 
-        # 解析历史数据（从第5行开始，索引4）
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
         history = []
-        for row in lines[4:]:  # 第5行及以后
+        for row in lines[4:]:
             if not row or len(row) < 2:
                 continue
             date_str = row[0].strip()
@@ -460,12 +454,11 @@ elif task.startswith("Task 6"):
             except:
                 continue
             record_date = date(date.today().year, month, day)
-            # 每一列对应一个活动（从索引1开始）
             for idx, act in enumerate(activities):
-                col_idx = idx + 1  # 第0列是日期，活动从第1列开始
+                col_idx = idx + 1
                 if col_idx < len(row):
                     val = row[col_idx].strip().upper()
-                    if val == "X":
+                    if val == "X" or val == "1":
                         achieved = 1.0
                     elif val.replace(".","",1).isdigit():
                         achieved = float(val)
@@ -474,26 +467,24 @@ elif task.startswith("Task 6"):
                     if achieved > 0:
                         history.append({
                             "date": record_date,
-                            "activity_name": act["name"],
+                            "activity_name": act["name"],   # 已经 trim
                             "achieved": achieved
                         })
         return activities, history
 
     def init_activities_from_list(act_list):
-        """将活动列表插入 Supabase，若已存在则跳过（按名称去重）"""
         for act in act_list:
             supabase.table("activities").upsert({
                 "name": act["name"],
                 "category": act["category"],
                 "budget": act["budget"]
             }, on_conflict="name").execute()
+        # 清除可能存在的旧缓存（如果有）
         st.cache_data.clear()
 
     def import_history(history_list):
-        """将历史记录批量 upsert 到 checkins 表"""
         if not history_list:
             return
-        # 先取得所有活动的 name -> id 映射
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
         for rec in history_list:
@@ -519,7 +510,6 @@ elif task.startswith("Task 6"):
             init_activities_from_list(acts)
             import_history(hist)
             st.success("Activities and history imported! Refreshing...")
-            st.cache_data.clear()
             st.rerun()
         st.stop()
 
@@ -562,10 +552,10 @@ elif task.startswith("Task 6"):
                     "activity_id": act_id,
                     "achieved": achieved
                 }).execute()
-        st.success("Check-in saved!")
+        st.success("Check-in saved! Dashboard updated.")
         st.rerun()
 
-    # ---------- YTD 看板 ----------
+    # ---------- YTD 看板（无缓存，实时查询）----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
@@ -650,22 +640,19 @@ elif task.startswith("Task 6"):
         if st.button("Update Budget"):
             supabase.table("activities").update({"budget": new_budget}).eq("id", act["id"]).execute()
             st.success(f"Budget for '{selected_act}' updated to {new_budget}.")
-            st.cache_data.clear()
             st.rerun()
 
-    # ---------- 批量上传历史数据 ----------
+    # ---------- 批量上传 / 更新历史 ----------
     st.markdown("### 📤 Upload CSV to Import / Update History")
-    st.caption("Upload a CSV file with the same format to bulk-import or update past check-ins. (Existing records will be updated, not duplicated.)")
+    st.caption("Re-upload your CSV at any time to refresh past check-ins (duplicates will be updated, not added).")
     uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
     if uploaded_history is not None:
         acts_parsed, hist_parsed = parse_csv_to_activities_and_history(uploaded_history)
         if acts_parsed is None:
             st.stop()
-        # 将活动中可能新增的名称插入数据库（避免缺失）
-        init_activities_from_list(acts_parsed)
-        import_history(hist_parsed)
-        st.success("History imported! Refreshing...")
-        st.cache_data.clear()
+        init_activities_from_list(acts_parsed)   # 确保活动存在
+        import_history(hist_parsed)               # 导入所有历史
+        st.success("History imported! Dashboard numbers should now match your CSV.")
         st.rerun()
 
     # ---------- 导出备份 ----------
