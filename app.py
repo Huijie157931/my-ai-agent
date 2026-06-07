@@ -8,18 +8,25 @@ import google.generativeai as genai
 import requests
 import feedparser
 import streamlit.components.v1 as components
+from supabase import create_client, Client
 import time, io, random, csv, re
 
 # ---------- 初始化 ----------
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel("gemini-2.5-flash")
 
+# Supabase 客户端
+supabase: Client = create_client(
+    st.secrets["SUPABASE_URL"],
+    st.secrets["SUPABASE_KEY"]
+)
+
 st.set_page_config(page_title="Personal AI Agent", page_icon="🤖", layout="wide")
 st.title("🤖 Personal AI Assistant – Full Demo")
 today_date = date.today().strftime("%B %d, %Y")
 st.caption(f"📅 {today_date}")
 
-# ---------- 辅助绘图函数（时区安全）----------
+# ---------- 辅助绘图函数（不变）----------
 def safe_tz_convert(df, tz_name):
     if df.empty:
         return df
@@ -92,7 +99,7 @@ task = st.sidebar.selectbox(
         "Task 3: STM Industry News",
         "Task 4: Global Frontiers Update",
         "Task 5: Product Hunt",
-        "Task 6: Daily Check-in & Dashboard (coming soon)",
+        "Task 6: Daily Check-in & Dashboard",
     ],
 )
 
@@ -387,7 +394,212 @@ elif task.startswith("Task 5"):
     else:
         st.info("Click to fetch the latest Product Hunt products.")
 
-# ==================== TASK 6 (placeholder) ====================
+# ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
-    st.subheader("🏋️ Daily Check-in & Dashboard")
-    st.info("We are currently refining this module. Please use your existing Numbers tracker for now. The full interactive version will be back soon!")
+    st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
+    st.caption(f"All changes are saved automatically to the cloud database.")
+
+    # ---------- 辅助函数：从 Supabase 加载活动列表 ----------
+    @st.cache_data(ttl=2)  # 缓存2秒，确保数据较新
+    def load_activities_from_db():
+        res = supabase.table("activities").select("*").order("id").execute()
+        if res.data:
+            return pd.DataFrame(res.data)
+        else:
+            return pd.DataFrame(columns=["id", "name", "category", "budget"])
+
+    # ---------- 加载活动列表（若数据库为空，则从 CSV 初始化）----------
+    df_activities = load_activities_from_db()
+    if df_activities.empty:
+        st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
+        uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
+        if uploaded is not None:
+            # 解析 CSV（按新格式：第一行是Day，第二行Category，第三行Activity，第四行Target）
+            content = uploaded.read().decode("utf-8-sig")
+            reader = csv.reader(content.splitlines())
+            lines = list(reader)
+            if len(lines) < 4:
+                st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
+                st.stop()
+
+            # 第一行：Day, Daily, Daily...（可忽略，我们只需列索引）
+            # 第二行：Category (B, V, M, E)
+            cat_line = lines[1]
+            # 第三行：Activity 名称
+            act_line = lines[2]
+            # 第四行：Target
+            tgt_line = lines[3]
+
+            # 插入活动到 Supabase
+            for i in range(1, len(act_line)):  # 从索引1开始，因为第0列是 "Day" 或 "Activity" 标签
+                cat = cat_line[i].strip()
+                name = act_line[i].strip()
+                if cat in ("B","V","M","E") and name:
+                    budget_str = tgt_line[i].strip() if i < len(tgt_line) else "0"
+                    try:
+                        budget = float(budget_str)
+                    except:
+                        budget = 0.0
+                    # 插入活动（若已存在则忽略）
+                    supabase.table("activities").upsert({
+                        "name": name,
+                        "category": cat,
+                        "budget": budget
+                    }, on_conflict="name").execute()
+            st.success("Activities initialized from CSV! Refreshing...")
+            st.cache_data.clear()  # 清除缓存，重新加载
+            st.rerun()
+        st.stop()
+
+    # 从 DataFrame 构建 activities 列表
+    activities = []
+    for _, row in df_activities.iterrows():
+        activities.append({
+            "id": row["id"],
+            "name": row["name"],
+            "category": row["category"],
+            "budget": row["budget"]
+        })
+
+    # ---------- 打卡界面 ----------
+    st.markdown("### 📅 Select Date for Check-in")
+    selected_date = st.date_input("Pick a date", date.today())
+    st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
+
+    # 获取该日期的打卡记录
+    checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
+    day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
+
+    col_cat = {"B": "🟢 Body", "V": "🟣 Value", "M": "🔵 Mental", "E": "🔴 Emotion"}
+    categories = ["B","V","M","E"]
+    updated_entries = {}
+    for cat in categories:
+        st.markdown(f"**{col_cat[cat]}**")
+        cat_acts = [a for a in activities if a["category"] == cat]
+        cols = st.columns(len(cat_acts))
+        for i, act in enumerate(cat_acts):
+            current_val = day_map.get(act["id"], 0)
+            checked = cols[i].checkbox(act["name"], value=(current_val > 0), key=f"{act['id']}_{selected_date}")
+            updated_entries[act["id"]] = 1.0 if checked else 0.0
+
+    if st.button("💾 Save Check-in"):
+        # 批量更新该日期的所有活动
+        for act_id, achieved in updated_entries.items():
+            # 先删除旧记录，再插入新记录（upsert）
+            supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).eq("activity_id", act_id).execute()
+            if achieved > 0:
+                supabase.table("checkins").insert({
+                    "checkin_date": selected_date.isoformat(),
+                    "activity_id": act_id,
+                    "achieved": achieved
+                }).execute()
+        st.success("Check-in saved successfully!")
+        st.rerun()
+
+    # ---------- YTD 看板 ----------
+    st.markdown("### 📊 Year-to-Date Progress")
+    # 查询今年所有的打卡记录
+    year_start = date(date.today().year, 1, 1).isoformat()
+    today_iso = date.today().isoformat()
+    res = supabase.table("checkins").select("checkin_date, activity_id, achieved").gte("checkin_date", year_start).lte("checkin_date", today_iso).execute()
+    if res.data:
+        df_checkins = pd.DataFrame(res.data)
+        df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
+        # 合并活动信息
+        df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
+        # 按活动汇总
+        actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
+    else:
+        actual = pd.DataFrame()
+
+    if not actual.empty:
+        days_passed = (date.today() - date(date.today().year, 1, 1)).days + 1
+        progress_rows = []
+        for _, row in actual.iterrows():
+            budget = row["budget"]
+            achieved = row["achieved"]
+            expected = round(budget * days_passed / 365, 1)
+            ratio = achieved / budget if budget > 0 else 0
+            if achieved >= expected:
+                status = "On Track"
+            elif achieved >= expected * 0.8:
+                status = "Slightly Behind"
+            else:
+                status = "Behind"
+            progress_rows.append({
+                "Category": row["category"],
+                "Activity": row["name"],
+                "Annual Target": int(round(budget)),
+                "Actual YTD": int(round(achieved)),
+                "Expected YTD": int(round(expected)),
+                "Progress %": f"{ratio:.1%}",
+                "Status": status
+            })
+        df_progress = pd.DataFrame(progress_rows)
+
+        def status_color(val):
+            if val == "On Track":
+                return "background-color: #d4edda; color: #155724"
+            elif val == "Slightly Behind":
+                return "background-color: #fff3cd; color: #856404"
+            else:
+                return "background-color: #f8d7da; color: #721c24"
+
+        styled = df_progress.style.map(status_color, subset=["Status"])
+        st.dataframe(styled, use_container_width=True)
+
+        # 大类进度
+        st.markdown("**Category Totals**")
+        cat_summary = []
+        for cat in categories:
+            cat_df = actual[actual["category"] == cat]
+            if not cat_df.empty:
+                total_budget = cat_df["budget"].sum()
+                total_actual = cat_df["achieved"].sum()
+                expected_cat = total_budget * days_passed / 365
+                cat_status = "On Track" if total_actual >= expected_cat else "Behind"
+                cat_summary.append({
+                    "Category": cat,
+                    "Total Target": int(round(total_budget)),
+                    "Actual": int(round(total_actual)),
+                    "Expected": int(round(expected_cat)),
+                    "Progress %": f"{total_actual / total_budget:.1%}" if total_budget > 0 else "0%",
+                    "Status": cat_status
+                })
+        if cat_summary:
+            df_cat = pd.DataFrame(cat_summary)
+            styled_cat = df_cat.style.map(
+                lambda val: "background-color: #d4edda; color: #155724" if val == "On Track" else "background-color: #f8d7da; color: #721c24",
+                subset=["Status"]
+            )
+            st.dataframe(styled_cat, use_container_width=True)
+    else:
+        st.info("No check-ins this year yet. Start by saving today's activities!")
+
+    # ---------- 编辑 Budget ----------
+    st.markdown("### ✏️ Edit Annual Budget")
+    selected_act = st.selectbox("Select activity to modify:", [a["name"] for a in activities])
+    if selected_act:
+        act = next(a for a in activities if a["name"] == selected_act)
+        new_budget = st.number_input(f"New budget for {selected_act}", value=int(act["budget"]), min_value=0)
+        if st.button("Update Budget"):
+            supabase.table("activities").update({"budget": new_budget}).eq("id", act["id"]).execute()
+            st.success(f"Budget for '{selected_act}' updated to {new_budget}.")
+            st.cache_data.clear()
+            st.rerun()
+
+    # ---------- 导出备份 ----------
+    st.markdown("### 📥 Export Data")
+    if st.button("Download full history as CSV"):
+        # 导出所有打卡记录（宽表）
+        full_res = supabase.table("checkins").select("*").execute()
+        if full_res.data:
+            df_all = pd.DataFrame(full_res.data)
+            df_all = df_all.merge(df_activities[["id", "name"]], left_on="activity_id", right_on="id")
+            pivot = df_all.pivot_table(index="checkin_date", columns="name", values="achieved", aggfunc="sum", fill_value=0)
+            pivot = pivot.reset_index()
+            csv_buffer = io.StringIO()
+            pivot.to_csv(csv_buffer, index=False)
+            st.download_button("Download CSV", csv_buffer.getvalue(), file_name=f"activity_backup_{date.today()}.csv")
+        else:
+            st.info("No data to export.")
