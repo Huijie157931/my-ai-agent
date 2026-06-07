@@ -422,9 +422,9 @@ elif task.startswith("Task 6"):
         {"name": "Play/Exhibits/lecture", "category": "M", "budget": 25},
         {"name": "Meet new people", "category": "E", "budget": 25},
         {"name": "Deep exposure to nature", "category": "E", "budget": 15},
-        {"name": "Quarterly Review", "category": "V", "budget": 4},       # 尾部空格已去除
+        {"name": "Quarterly Review", "category": "V", "budget": 4},
         {"name": "CV & Jobs", "category": "M", "budget": 6},
-        {"name": "Yearly Review + Plan", "category": "V", "budget": 2},   # 尾部空格已去除
+        {"name": "Yearly Review + Plan", "category": "V", "budget": 2},
         {"name": "Annual leave", "category": "V", "budget": 20},
         {"name": "Family Gathering", "category": "E", "budget": 20},
         {"name": "Health Check", "category": "B", "budget": 8},
@@ -502,10 +502,10 @@ elif task.startswith("Task 6"):
                 })
         return history
 
-        def import_history(hist_list):
+    def import_history(hist_list):
         """
-        FIX: Supabase silently truncates upserts at ~1000 rows.
-        Now batch records into chunks of 500.
+        修复：Supabase 静默截断超过 1000 行的 upsert。
+        将记录分批（每批 500 行）发送，确保全部导入。
         """
         if not hist_list:
             return
@@ -524,7 +524,7 @@ elif task.startswith("Task 6"):
         if not records:
             return
 
-        # 分批导入
+        # 分批处理
         BATCH_SIZE = 500
         total_batches = (len(records) + BATCH_SIZE - 1) // BATCH_SIZE
         progress = st.progress(0, text="Importing records…")
