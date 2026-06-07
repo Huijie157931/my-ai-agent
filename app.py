@@ -403,51 +403,65 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption("All changes are saved automatically. Data will not change on refresh.")
 
-    # ---------- 确保唯一索引（请在 Supabase SQL Editor 手动执行一次下面的 SQL，然后就可以删掉这行注释）----------
-    # ALTER TABLE checkins ADD CONSTRAINT IF NOT EXISTS checkins_date_activity_unique UNIQUE (checkin_date, activity_id);
+    # ---------- 硬编码活动定义（顺序与你原 CSV 一致）----------
+    DEFAULT_ACTIVITIES = [
+        {"name": "Food & Water & Self care", "category": "B", "budget": 330},
+        {"name": "Energy, Focus and Emotion", "category": "B", "budget": 280},
+        {"name": "Basic Exercise", "category": "B", "budget": 365},
+        {"name": "Foot step", "category": "B", "budget": 200},
+        {"name": ">.5hour MAG", "category": "M", "budget": 300},
+        {"name": ">.5hour books", "category": "M", "budget": 300},
+        {"name": "Meditation", "category": "V", "budget": 365},
+        {"name": "Sketch", "category": "V", "budget": 365},
+        {"name": "Life Admin", "category": "V", "budget": 53},
+        {"name": "Learn sth new", "category": "M", "budget": 50},
+        {"name": "Movie", "category": "M", "budget": 54},
+        {"name": "Extra Exercise", "category": "B", "budget": 200},
+        {"name": "Monthly review", "category": "V", "budget": 12},
+        {"name": "Invest", "category": "M", "budget": 12},
+        {"name": "Play/Exhibits/lecture", "category": "M", "budget": 25},
+        {"name": "Meet new people", "category": "E", "budget": 25},
+        {"name": "Deep exposure to nature", "category": "E", "budget": 15},
+        {"name": "Quarterly Review", "category": "V", "budget": 4},   # 已去除尾部空格
+        {"name": "CV & Jobs", "category": "M", "budget": 6},
+        {"name": "Yearly Review + Plan", "category": "V", "budget": 2}, # 已去除尾部空格
+        {"name": "Annual leave", "category": "V", "budget": 20},
+        {"name": "Family Gathering", "category": "E", "budget": 20},
+        {"name": "Health Check", "category": "B", "budget": 8},
+        {"name": "Extensive Journey (km)", "category": "B", "budget": 7},
+        {"name": "People", "category": "E", "budget": 300},
+        {"name": "Give back", "category": "V", "budget": 100},
+        {"name": "Engage. Get buy in. Inspire.", "category": "E", "budget": 225},
+        {"name": "Seek for help", "category": "E", "budget": 200},
+        {"name": "Confident & Brave", "category": "E", "budget": 120},
+        {"name": "Storytelling/talkative", "category": "M", "budget": 100},
+        {"name": "AI", "category": "M", "budget": 200},
+        {"name": "Growth Mindset", "category": "V", "budget": 330},
+    ]
 
-    def load_activities_from_db():
-        res = supabase.table("activities").select("*").order("id").execute()
-        return pd.DataFrame(res.data) if res.data else pd.DataFrame(
-            columns=["id", "name", "category", "budget"]
-        )
+    # ---------- 初始化活动到 Supabase（仅首次）----------
+    def init_activities_to_db():
+        for act in DEFAULT_ACTIVITIES:
+            supabase.table("activities").upsert({
+                "name": act["name"],
+                "category": act["category"],
+                "budget": act["budget"]
+            }, on_conflict="name").execute()
 
-    def parse_my_csv(uploaded_file):
+    # ---------- 解析纯数据 CSV ----------
+    def parse_data_csv(uploaded_file):
         """
-        预期 CSV 格式（已删除表头行）：
-            Row 0 : MEVB Category | B | B | M | V | …   (类别)
-            Row 1 : Activity       | 名称1 | 名称2 | …  (活动名)
-            Row 2 : BUDGET         | 330 | 280 | …     (预算)
-            Row 3+: Jan 1          | 1   | 0   | 1  …  (每日数据)
+        纯数据 CSV 格式：
+          - 第 1 列：日期 (Jan 1)
+          - 第 2~33 列：对应 32 个活动的完成情况（1 或空），列顺序必须与 DEFAULT_ACTIVITIES 一致
+          - 无任何表头行
         """
         content = uploaded_file.read().decode("utf-8-sig")
-        reader = csv.reader(content.splitlines())
+        reader = csv.reader(io.StringIO(content))
         rows = list(reader)
-
-        if len(rows) < 4:
-            st.error("CSV must have at least 4 rows (category, activity, budget, data…).")
-            return None, None
-
-        cat_row = rows[0]
-        act_row = rows[1]
-        budget_row = rows[2]
-
-        activities = []
-        for i in range(1, len(act_row)):
-            cat = cat_row[i].strip() if i < len(cat_row) else ""
-            name = act_row[i].strip() if i < len(act_row) else ""
-            if cat not in ("B", "V", "M", "E") or not name:
-                continue
-            budget_str = budget_row[i].strip() if i < len(budget_row) else "0"
-            try:
-                budget = float(budget_str)
-            except ValueError:
-                budget = 0.0
-            activities.append({"name": name, "category": cat, "budget": budget})
-
-        if len(activities) != 32:
-            st.error(f"Expected 32 activities, found {len(activities)}. Check CSV columns.")
-            return None, None
+        if len(rows) < 1:
+            st.error("CSV must contain at least one data row.")
+            return None
 
         month_map = {
             "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
@@ -457,7 +471,7 @@ elif task.startswith("Task 6"):
         history = []
         current_year = date.today().year
 
-        for row in rows[3:]:
+        for row in rows:
             if not row or not row[0].strip():
                 continue
             date_str = row[0].strip()
@@ -474,45 +488,33 @@ elif task.startswith("Task 6"):
             except (ValueError, TypeError):
                 continue
 
-            for idx, act in enumerate(activities):
+            for idx in range(32):   # 共 32 个活动
                 col = idx + 1
                 if col >= len(row):
-                    continue
-                raw = row[col].strip().upper() if row[col] else ""
+                    break
+                raw = row[col].strip().upper()
                 if raw in ("X", "1"):
                     achieved = 1.0
-                elif raw.replace(".", "", 1).lstrip("-").isdigit():
+                elif raw.replace(".", "", 1).isdigit():
                     achieved = float(raw)
                 else:
-                    achieved = 0.0
+                    continue
+                history.append({
+                    "date": record_date,
+                    "activity_name": DEFAULT_ACTIVITIES[idx]["name"],
+                    "achieved": achieved,
+                })
+        return history
 
-                if achieved > 0:
-                    history.append({
-                        "date": record_date,
-                        "activity_name": act["name"],
-                        "achieved": achieved,
-                    })
-        return activities, history
-
-    def init_activities(act_list):
-        for act in act_list:
-            supabase.table("activities").upsert(
-                {"name": act["name"], "category": act["category"], "budget": act["budget"]},
-                on_conflict="name",
-            ).execute()
-
-    def import_hist(hist_list):
+    def import_history(hist_list):
         if not hist_list:
             return
         res = supabase.table("activities").select("id, name").execute()
-        name_to_id = (
-            {r["name"].strip(): r["id"] for r in res.data} if res.data else {}
-        )
+        name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
         records = []
         for rec in hist_list:
             act_id = name_to_id.get(rec["activity_name"])
             if act_id is None:
-                st.warning(f"Activity not found in DB: '{rec['activity_name']}'")
                 continue
             records.append({
                 "checkin_date": rec["date"].isoformat(),
@@ -520,27 +522,16 @@ elif task.startswith("Task 6"):
                 "achieved": rec["achieved"],
             })
         if records:
-            supabase.table("checkins").upsert(
-                records, on_conflict="checkin_date,activity_id"
-            ).execute()
+            supabase.table("checkins").upsert(records, on_conflict="checkin_date,activity_id").execute()
 
-    # ---------- 初始化 ----------
-    df_act = load_activities_from_db()
-    if df_act.empty:
-        st.warning("No activities found. Upload your CSV file to initialise the tracker.")
-        with st.form("init_form"):
-            up_file = st.file_uploader("Upload CSV", type="csv")
-            sub = st.form_submit_button("Initialise Tracker")
-            if sub and up_file is not None:
-                acts, hist = parse_my_csv(up_file)
-                if acts:
-                    init_activities(acts)
-                    import_hist(hist)
-                    st.success(f"Initialised {len(acts)} activities and {len(hist)} records.")
-                    st.rerun()
-        st.stop()
+    # ---------- 保证活动已初始化 ----------
+    df_act = supabase.table("activities").select("*").order("id").execute()
+    if not df_act.data:
+        init_activities_to_db()
+        st.success("Activities initialised from built‑in list.")
+        st.rerun()
 
-    activities = df_act.to_dict("records")
+    activities = df_act.data  # 从数据库读取，包含 id
 
     # ---------- 每日打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
@@ -603,7 +594,7 @@ elif task.startswith("Task 6"):
         .execute()
     )
 
-    achieved_by_id: dict[int, float] = defaultdict(float)
+    achieved_by_id = defaultdict(float)
     if res_ytd.data:
         for r in res_ytd.data:
             achieved_by_id[r["activity_id"]] += float(r["achieved"])
@@ -685,16 +676,16 @@ elif task.startswith("Task 6"):
             st.success("Updated!")
             st.rerun()
 
-    # ---------- 重新导入 ----------
-    st.markdown("### 📤 Re-import History from CSV")
+    # ---------- 导入历史数据 ----------
+    st.markdown("### 📤 Import History from Data-Only CSV")
+    st.caption("Upload a CSV with only dates and 1/empty flags (no headers), columns must match the built‑in order.")
     with st.form("reimport"):
-        up_hist = st.file_uploader("Upload CSV", type="csv")
+        up_hist = st.file_uploader("Upload Data CSV", type="csv")
         if st.form_submit_button("Import History") and up_hist is not None:
-            acts_p, hist_p = parse_my_csv(up_hist)
-            if acts_p:
-                init_activities(acts_p)
-                import_hist(hist_p)
-                st.success(f"Imported {len(hist_p)} records.")
+            hist = parse_data_csv(up_hist)
+            if hist is not None:
+                import_history(hist)
+                st.success(f"Imported {len(hist)} records.")
                 st.rerun()
 
     # ---------- 导出 ----------
@@ -703,7 +694,7 @@ elif task.startswith("Task 6"):
         full_res = supabase.table("checkins").select("*").execute()
         if full_res.data:
             df_all = pd.DataFrame(full_res.data)
-            df_all = df_all.merge(df_act[["id", "name"]], left_on="activity_id", right_on="id")
+            df_all = df_all.merge(pd.DataFrame(activities)[["id", "name"]], left_on="activity_id", right_on="id")
             pivot = df_all.pivot_table(
                 index="checkin_date", columns="name",
                 values="achieved", aggfunc="sum", fill_value=0,
