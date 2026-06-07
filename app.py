@@ -106,12 +106,14 @@ task = st.sidebar.selectbox(
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
     st.subheader("📰 Today’s German Learning Sentence")
-    st.caption("Based on a real news headline from BBC")
-    bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
+    st.caption("Based on a real headline from Die Zeit · Free API: 20 requests/day")
+
+    # Die Zeit RSS
+    zeit_rss = "https://newsfeed.zeit.de/all"
     news_title = ""
     news_link = ""
     try:
-        feed = feedparser.parse(bbc_rss)
+        feed = feedparser.parse(zeit_rss)
         if feed.entries:
             chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
             news_title = chosen.title
@@ -121,23 +123,21 @@ if task.startswith("Task 1"):
         news_link = ""
 
     if news_title:
-        st.markdown(f"**📌 Today's headline:** {news_title}")
+        st.markdown(f"**📌 Today's headline (German):** {news_title}")
         if news_link:
             st.markdown(f"[🔗 Read full article]({news_link})")
     else:
         st.warning("Could not fetch latest news. Using generic prompt.")
 
-    if st.button("Generate Sentence"):
+    if st.button("Generate Explanation"):
         with st.spinner("Generating..."):
             prompt = (
-                f"Today is {today_date}. The reference news headline is: '{news_title}'. "
-                "Based on this exact news topic, generate: "
-                "1) A single German sentence at A2 level. "
-                "2) Its accurate English translation. "
-                "3) 3-5 key German words from the sentence, each with its English meaning and a short example phrase. Format as 'Word (part of speech): meaning | Example: ...' "
-                "4) One brief grammar explanation (in English). "
+                f"The German news headline is: '{news_title}'. "
+                "Please provide:\n"
+                "1) An accurate English translation of this headline.\n"
+                "2) 3-5 key German words from the headline, each with its English meaning and a short example phrase. Format as 'Word (part of speech): meaning | Example: ...'\n"
+                "3) One brief grammar explanation (in English) highlighting a structure used in the headline.\n"
                 "Format exactly:\n"
-                "German: <sentence>\n"
                 "English: <translation>\n"
                 "Vocabulary:\n"
                 "- <Word1 (pos)>: <meaning> | Example: <example>\n"
@@ -148,14 +148,12 @@ if task.startswith("Task 1"):
                 response = model.generate_content(prompt)
                 text = response.text
                 lines = text.split("\n")
-                german = english = grammar = ""
+                english = grammar = ""
                 vocab = []
                 mode = None
                 for line in lines:
                     line = line.strip()
-                    if line.startswith("German:"):
-                        german = line.replace("German:", "").strip()
-                    elif line.startswith("English:"):
+                    if line.startswith("English:"):
                         english = line.replace("English:", "").strip()
                     elif line.startswith("Grammar:"):
                         grammar = line.replace("Grammar:", "").strip()
@@ -163,23 +161,27 @@ if task.startswith("Task 1"):
                         mode = "vocab"
                     elif mode == "vocab" and line.startswith("-"):
                         vocab.append(line.lstrip("- ").strip())
-                if german:
-                    st.success(f"**🇩🇪 German:** {german}")
-                    tts_html = f"""
-                    <div style="margin-top:8px;">
-                        <button onclick="speak()" style="padding:6px 12px; font-size:14px;">🔊 Listen</button>
-                    </div>
-                    <script>
-                    function speak() {{
-                        var msg = new SpeechSynthesisUtterance();
-                        msg.text = `{german}`;
-                        msg.lang = 'de-DE';
-                        msg.rate = 0.9;
-                        window.speechSynthesis.speak(msg);
-                    }}
-                    </script>
-                    """
-                    components.html(tts_html, height=60)
+
+                # 显示德语原文（即标题）
+                st.success(f"**🇩🇪 German:** {news_title}")
+
+                # 语音朗读德语标题
+                tts_html = f"""
+                <div style="margin-top:8px;">
+                    <button onclick="speak()" style="padding:6px 12px; font-size:14px;">🔊 Listen</button>
+                </div>
+                <script>
+                function speak() {{
+                    var msg = new SpeechSynthesisUtterance();
+                    msg.text = `{news_title}`;
+                    msg.lang = 'de-DE';
+                    msg.rate = 0.9;
+                    window.speechSynthesis.speak(msg);
+                }}
+                </script>
+                """
+                components.html(tts_html, height=60)
+
                 if english:
                     st.info(f"**🇬🇧 English:** {english}")
                 if vocab:
@@ -188,10 +190,15 @@ if task.startswith("Task 1"):
                         st.markdown(f"- {v}")
                 if grammar:
                     st.markdown(f"**📐 Grammar Note:** {grammar}")
+
             except Exception as e:
-                st.error(f"API error: {e}")
+                err = str(e)
+                if "429" in err or "ResourceExhausted" in err:
+                    st.error("⚠️ Daily free API quota exhausted (20 requests). Please try again tomorrow, or upgrade your API plan.")
+                else:
+                    st.error(f"API error: {e}")
     else:
-        st.info("Click the button to generate a sentence based on today’s news.")
+        st.info("Click to get English translation, vocabulary, and grammar explanation for the German headline.")
 
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
