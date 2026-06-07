@@ -399,17 +399,12 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption("All changes are saved automatically. Data will not change on refresh.")
 
-    # ---------- 确保唯一约束 ----------
+    # 确保唯一索引（幂等）
     try:
-        supabase.rpc("create_checkins_unique", {})  # 尝试调用一个自定义函数（如果已创建会报错）
+        supabase.sql("ALTER TABLE checkins ADD CONSTRAINT IF NOT EXISTS checkins_date_activity_unique UNIQUE (checkin_date, activity_id);")
     except:
-        # 直接通过 SQL 创建唯一约束（若已存在则忽略）
-        try:
-            supabase.sql("ALTER TABLE checkins ADD CONSTRAINT IF NOT EXISTS checkins_date_activity_unique UNIQUE (checkin_date, activity_id);")
-        except:
-            pass
+        pass
 
-    # ---------- 辅助函数（无缓存）----------
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
@@ -490,33 +485,37 @@ elif task.startswith("Task 6"):
     def import_history(history_list):
         if not history_list:
             return
-        # 获取活动名称到 ID 的映射
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
-        
-        # 收集所有需要导入的日期，并先删除这些日期的旧记录（批量删除）
-        dates_set = {rec["date"].isoformat() for rec in history_list}
-        for d_str in dates_set:
-            supabase.table("checkins").delete().eq("checkin_date", d_str).execute()
-        
-        # 插入新记录
+        from collections import defaultdict
+        date_entries = defaultdict(list)
         for rec in history_list:
             act_name = rec["activity_name"]
             if act_name not in name_to_id:
                 continue
             act_id = name_to_id[act_name]
-            supabase.table("checkins").insert({
-                "checkin_date": rec["date"].isoformat(),
+            date_entries[rec["date"].isoformat()].append({
                 "activity_id": act_id,
                 "achieved": rec["achieved"]
-            }).execute()
+            })
+        # 按日期先删除再插入
+        for d_str, entries in date_entries.items():
+            supabase.table("checkins").delete().eq("checkin_date", d_str).execute()
+            for e in entries:
+                supabase.table("checkins").insert({
+                    "checkin_date": d_str,
+                    "activity_id": e["activity_id"],
+                    "achieved": e["achieved"]
+                }).execute()
 
-    # ---------- 加载活动 ----------
+    # ---------- 首次初始化（表单形式）----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
         st.warning("No activities found. Please upload your CSV to initialize the tracker.")
-        uploaded_init = st.file_uploader("Upload CSV", type="csv", key="init_upload")
-        if st.button("Initialize Tracker"):
+        with st.form("init_form"):
+            uploaded_init = st.file_uploader("Upload CSV", type="csv")
+            submitted_init = st.form_submit_button("Initialize Tracker")
+        if submitted_init:
             if uploaded_init is None:
                 st.error("Please select a CSV file first.")
             else:
@@ -525,8 +524,6 @@ elif task.startswith("Task 6"):
                     st.stop()
                 init_activities_from_list(acts)
                 import_history(hist)
-                # 清除上传组件状态
-                st.session_state.pop("init_upload", None)
                 st.success(f"Tracker initialized! {len(acts)} activities, {len(hist)} history records.")
                 st.rerun()
         st.stop()
@@ -540,11 +537,10 @@ elif task.startswith("Task 6"):
             "budget": row["budget"]
         })
 
-    # ---------- 打卡界面 ----------
+    # ---------- 打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
-
     checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
     day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
 
@@ -564,7 +560,6 @@ elif task.startswith("Task 6"):
             updated_entries[act["id"]] = 1.0 if checked else 0.0
             if checked:
                 total_checked += 1
-
     st.markdown(f"**✅ Today's count: {total_checked} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
@@ -576,11 +571,10 @@ elif task.startswith("Task 6"):
                     "activity_id": act_id,
                     "achieved": achieved
                 }).execute()
-        st.success("Saved! Dashboard updated.")
-        time.sleep(0.3)
+        st.success("Saved!")
         st.rerun()
 
-    # ---------- YTD 看板（实时查询）----------
+    # ---------- YTD 看板 ----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
@@ -590,6 +584,12 @@ elif task.startswith("Task 6"):
         df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
         df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
         actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
+        # 调试信息
+        food_act = df_activities[df_activities["name"].str.contains("Food", case=False)]
+        if not food_act.empty:
+            food_id = food_act.iloc[0]["id"]
+            food_count = len(df_checkins[df_checkins["activity_id"] == food_id])
+            st.caption(f"Food records in DB: {food_count}")
     else:
         actual = pd.DataFrame()
 
@@ -667,11 +667,13 @@ elif task.startswith("Task 6"):
             st.success("Budget updated!")
             st.rerun()
 
-    # ---------- 重新导入 CSV（按钮触发，先删除旧数据）----------
+    # ---------- 重新导入（表单，安全）----------
     st.markdown("### 📤 Re-import History from CSV")
     st.caption("Upload a CSV and click the button to replace all history for the dates in the file.")
-    uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
-    if st.button("Import History"):
+    with st.form("reimport_form"):
+        uploaded_history = st.file_uploader("Upload CSV", type="csv")
+        submitted_history = st.form_submit_button("Import History")
+    if submitted_history:
         if uploaded_history is None:
             st.error("Please select a CSV file first.")
         else:
@@ -680,11 +682,10 @@ elif task.startswith("Task 6"):
                 st.stop()
             init_activities_from_list(acts_parsed)
             import_history(hist_parsed)
-            st.session_state.pop("history_upload", None)
             st.success(f"History imported! {len(hist_parsed)} records upserted. Dashboard updated.")
             st.rerun()
 
-    # ---------- 导出备份 ----------
+    # ---------- 导出 ----------
     st.markdown("### 📥 Export Data")
     if st.button("Generate Download Link"):
         full_res = supabase.table("checkins").select("*").execute()
