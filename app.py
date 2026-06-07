@@ -451,7 +451,6 @@ elif task.startswith("Task 6"):
     # ---------- 解析纯数据 CSV（强制只读前33列）----------
     def parse_data_csv(uploaded_file):
         content = uploaded_file.read().decode("utf-8-sig")
-        # 自动检测分隔符
         sniffer = csv.Sniffer()
         delimiter = sniffer.sniff(content[:1024]).delimiter if content.strip() else ','
         reader = csv.reader(io.StringIO(content), delimiter=delimiter)
@@ -468,8 +467,7 @@ elif task.startswith("Task 6"):
         for row in rows:
             if not row or not row[0].strip():
                 continue
-            # 只取前33列（日期 + 32个活动），忽略多余列
-            row = row[:33]
+            row = row[:33]  # 只取前33列（日期 + 32个活动），忽略多余列
             date_str = row[0].strip()
             parts = date_str.split()
             if len(parts) != 2:
@@ -503,10 +501,6 @@ elif task.startswith("Task 6"):
         return history
 
     def import_history(hist_list):
-        """
-        修复：Supabase 静默截断超过 1000 行的 upsert。
-        将记录分批（每批 500 行）发送，确保全部导入。
-        """
         if not hist_list:
             return
         res = supabase.table("activities").select("id, name").execute()
@@ -524,7 +518,6 @@ elif task.startswith("Task 6"):
         if not records:
             return
 
-        # 分批处理
         BATCH_SIZE = 500
         total_batches = (len(records) + BATCH_SIZE - 1) // BATCH_SIZE
         progress = st.progress(0, text="Importing records…")
@@ -596,25 +589,38 @@ elif task.startswith("Task 6"):
         st.success("Saved!")
         st.rerun()
 
-    # ---------- YTD 进度 ----------
+    # ---------- YTD 进度（分页查询）----------
     st.markdown("### 📊 Year-to-Date Progress")
 
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
     dp = min((date.today() - date(date.today().year, 1, 1)).days + 1, 365)
 
-    res_ytd = (
-        supabase.table("checkins")
-        .select("checkin_date, activity_id, achieved")
-        .gte("checkin_date", year_start)
-        .lte("checkin_date", today_iso)
-        .execute()
-    )
+    # FIX: Supabase SELECT 也有 1000 行的默认限制，需要分页
+    def fetch_all_checkins(year_start, today_iso, page_size=1000):
+        all_rows = []
+        offset = 0
+        while True:
+            res = (
+                supabase.table("checkins")
+                .select("activity_id, achieved")
+                .gte("checkin_date", year_start)
+                .lte("checkin_date", today_iso)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = res.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        return all_rows
+
+    ytd_data = fetch_all_checkins(year_start, today_iso)
 
     achieved_by_id = defaultdict(float)
-    if res_ytd.data:
-        for r in res_ytd.data:
-            achieved_by_id[r["activity_id"]] += float(r["achieved"])
+    for r in ytd_data:
+        achieved_by_id[r["activity_id"]] += float(r["achieved"])
 
     prog_rows = []
     for act in activities:
@@ -695,13 +701,13 @@ elif task.startswith("Task 6"):
 
     # ---------- 导入历史数据（先清空再导入）----------
     st.markdown("### 📤 Import History from Data-Only CSV")
-    st.caption("Upload your data CSV (dates in first column, 32 data columns). Extra columns will be ignored. All previous check-ins will be replaced.")
+    st.caption("Upload your data CSV (dates in first column, 32 data columns). Previous check-ins will be replaced.")
     with st.form("reimport"):
         up_hist = st.file_uploader("Upload Data CSV", type="csv")
         if st.form_submit_button("Import History") and up_hist is not None:
             hist = parse_data_csv(up_hist)
             if hist:
-                # 删除所有旧记录，防止旧的不完整数据残留
+                # 清空旧记录
                 supabase.table("checkins").delete().neq("id", 0).execute()
                 import_history(hist)
                 st.rerun()
