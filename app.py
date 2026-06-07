@@ -397,10 +397,10 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption(f"All changes are saved automatically to the cloud database.")
+    st.caption("All changes are saved automatically to the cloud database.")
 
-    # ---------- 辅助函数：从 Supabase 加载活动列表 ----------
-    @st.cache_data(ttl=2)  # 缓存2秒，确保数据较新
+    # ---------- 辅助函数 ----------
+    @st.cache_data(ttl=2)
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
@@ -408,50 +408,122 @@ elif task.startswith("Task 6"):
         else:
             return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
-    # ---------- 加载活动列表（若数据库为空，则从 CSV 初始化）----------
+    def parse_csv_to_activities_and_history(uploaded_file):
+        """返回 activities 列表 (dict) 和 history 列表 (dict)"""
+        content = uploaded_file.read().decode("utf-8-sig")
+        reader = csv.reader(content.splitlines())
+        lines = list(reader)
+        if len(lines) < 4:
+            st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
+            return None, None
+
+        # 第一行：Day, Daily, ... (列头)
+        # 第二行：Category (B, V, M, E)
+        cat_line = lines[1]
+        # 第三行：Activity 名称
+        act_line = lines[2]
+        # 第四行：Target
+        tgt_line = lines[3] if len(lines) > 3 else []
+
+        activities = []
+        # 解析活动（从索引1开始，第0列是 "Day" 或标签）
+        for i in range(1, len(act_line)):
+            cat = cat_line[i].strip() if i < len(cat_line) else ""
+            name = act_line[i].strip() if i < len(act_line) else ""
+            if cat in ("B","V","M","E") and name:
+                budget_str = tgt_line[i].strip() if i < len(tgt_line) else "0"
+                try:
+                    budget = float(budget_str)
+                except:
+                    budget = 0.0
+                activities.append({"name": name, "category": cat, "budget": budget})
+
+        # 解析历史数据（从第5行开始，索引4）
+        month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+                     "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+        history = []
+        for row in lines[4:]:  # 第5行及以后
+            if not row or len(row) < 2:
+                continue
+            date_str = row[0].strip()
+            if not date_str:
+                continue
+            parts = date_str.split()
+            if len(parts) != 2:
+                continue
+            month_abbr, day_str = parts[0], parts[1]
+            month = month_map.get(month_abbr)
+            if not month:
+                continue
+            try:
+                day = int(day_str)
+            except:
+                continue
+            record_date = date(date.today().year, month, day)
+            # 每一列对应一个活动（从索引1开始）
+            for idx, act in enumerate(activities):
+                col_idx = idx + 1  # 第0列是日期，活动从第1列开始
+                if col_idx < len(row):
+                    val = row[col_idx].strip().upper()
+                    if val == "X":
+                        achieved = 1.0
+                    elif val.replace(".","",1).isdigit():
+                        achieved = float(val)
+                    else:
+                        achieved = 0.0
+                    if achieved > 0:
+                        history.append({
+                            "date": record_date,
+                            "activity_name": act["name"],
+                            "achieved": achieved
+                        })
+        return activities, history
+
+    def init_activities_from_list(act_list):
+        """将活动列表插入 Supabase，若已存在则跳过（按名称去重）"""
+        for act in act_list:
+            supabase.table("activities").upsert({
+                "name": act["name"],
+                "category": act["category"],
+                "budget": act["budget"]
+            }, on_conflict="name").execute()
+        st.cache_data.clear()
+
+    def import_history(history_list):
+        """将历史记录批量 upsert 到 checkins 表"""
+        if not history_list:
+            return
+        # 先取得所有活动的 name -> id 映射
+        res = supabase.table("activities").select("id, name").execute()
+        name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
+        for rec in history_list:
+            act_name = rec["activity_name"]
+            if act_name not in name_to_id:
+                continue
+            act_id = name_to_id[act_name]
+            supabase.table("checkins").upsert({
+                "checkin_date": rec["date"].isoformat(),
+                "activity_id": act_id,
+                "achieved": rec["achieved"]
+            }, on_conflict="checkin_date, activity_id").execute()
+
+    # ---------- 加载当前活动 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
         st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
         uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
         if uploaded is not None:
-            # 解析 CSV（按新格式：第一行是Day，第二行Category，第三行Activity，第四行Target）
-            content = uploaded.read().decode("utf-8-sig")
-            reader = csv.reader(content.splitlines())
-            lines = list(reader)
-            if len(lines) < 4:
-                st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
+            acts, hist = parse_csv_to_activities_and_history(uploaded)
+            if acts is None:
                 st.stop()
-
-            # 第一行：Day, Daily, Daily...（可忽略，我们只需列索引）
-            # 第二行：Category (B, V, M, E)
-            cat_line = lines[1]
-            # 第三行：Activity 名称
-            act_line = lines[2]
-            # 第四行：Target
-            tgt_line = lines[3]
-
-            # 插入活动到 Supabase
-            for i in range(1, len(act_line)):  # 从索引1开始，因为第0列是 "Day" 或 "Activity" 标签
-                cat = cat_line[i].strip()
-                name = act_line[i].strip()
-                if cat in ("B","V","M","E") and name:
-                    budget_str = tgt_line[i].strip() if i < len(tgt_line) else "0"
-                    try:
-                        budget = float(budget_str)
-                    except:
-                        budget = 0.0
-                    # 插入活动（若已存在则忽略）
-                    supabase.table("activities").upsert({
-                        "name": name,
-                        "category": cat,
-                        "budget": budget
-                    }, on_conflict="name").execute()
-            st.success("Activities initialized from CSV! Refreshing...")
-            st.cache_data.clear()  # 清除缓存，重新加载
+            init_activities_from_list(acts)
+            import_history(hist)
+            st.success("Activities and history imported! Refreshing...")
+            st.cache_data.clear()
             st.rerun()
         st.stop()
 
-    # 从 DataFrame 构建 activities 列表
+    # 构建 activities 列表（带 id）
     activities = []
     for _, row in df_activities.iterrows():
         activities.append({
@@ -466,7 +538,6 @@ elif task.startswith("Task 6"):
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
 
-    # 获取该日期的打卡记录
     checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
     day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
 
@@ -483,9 +554,7 @@ elif task.startswith("Task 6"):
             updated_entries[act["id"]] = 1.0 if checked else 0.0
 
     if st.button("💾 Save Check-in"):
-        # 批量更新该日期的所有活动
         for act_id, achieved in updated_entries.items():
-            # 先删除旧记录，再插入新记录（upsert）
             supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).eq("activity_id", act_id).execute()
             if achieved > 0:
                 supabase.table("checkins").insert({
@@ -493,21 +562,18 @@ elif task.startswith("Task 6"):
                     "activity_id": act_id,
                     "achieved": achieved
                 }).execute()
-        st.success("Check-in saved successfully!")
+        st.success("Check-in saved!")
         st.rerun()
 
     # ---------- YTD 看板 ----------
     st.markdown("### 📊 Year-to-Date Progress")
-    # 查询今年所有的打卡记录
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
     res = supabase.table("checkins").select("checkin_date, activity_id, achieved").gte("checkin_date", year_start).lte("checkin_date", today_iso).execute()
     if res.data:
         df_checkins = pd.DataFrame(res.data)
         df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
-        # 合并活动信息
         df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
-        # 按活动汇总
         actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
     else:
         actual = pd.DataFrame()
@@ -548,7 +614,6 @@ elif task.startswith("Task 6"):
         styled = df_progress.style.map(status_color, subset=["Status"])
         st.dataframe(styled, use_container_width=True)
 
-        # 大类进度
         st.markdown("**Category Totals**")
         cat_summary = []
         for cat in categories:
@@ -588,10 +653,24 @@ elif task.startswith("Task 6"):
             st.cache_data.clear()
             st.rerun()
 
+    # ---------- 批量上传历史数据 ----------
+    st.markdown("### 📤 Upload CSV to Import / Update History")
+    st.caption("Upload a CSV file with the same format to bulk-import or update past check-ins. (Existing records will be updated, not duplicated.)")
+    uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
+    if uploaded_history is not None:
+        acts_parsed, hist_parsed = parse_csv_to_activities_and_history(uploaded_history)
+        if acts_parsed is None:
+            st.stop()
+        # 将活动中可能新增的名称插入数据库（避免缺失）
+        init_activities_from_list(acts_parsed)
+        import_history(hist_parsed)
+        st.success("History imported! Refreshing...")
+        st.cache_data.clear()
+        st.rerun()
+
     # ---------- 导出备份 ----------
     st.markdown("### 📥 Export Data")
-    if st.button("Download full history as CSV"):
-        # 导出所有打卡记录（宽表）
+    if st.button("Generate Download Link"):
         full_res = supabase.table("checkins").select("*").execute()
         if full_res.data:
             df_all = pd.DataFrame(full_res.data)
