@@ -549,7 +549,7 @@ elif task.startswith("Task 6"):
     # ---------- 初始化 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
-        st.warning("No activities found. Please upload your CSV.")
+        st.warning("No activities found. Please upload your CSV to initialize the tracker.")
         with st.form("init_form"):
             uploaded_init = st.file_uploader("Upload CSV", type="csv")
             submitted_init = st.form_submit_button("Initialize Tracker")
@@ -560,9 +560,9 @@ elif task.startswith("Task 6"):
                     acts, hist = parse_csv_v3(uploaded_init)
                     if acts is None:
                         st.stop()
-                    # 额外检查活动数量是否正确
-                    if len(acts) != 33:
-                        st.warning(f"Parsed {len(acts)} activities (expected 33). Please check CSV formatting and try again.")
+                    # 校验活动数量（你的文件应有 32 个活动）
+                    if len(acts) != 32:
+                        st.warning(f"Parsed {len(acts)} activities (expected 32). Please check your CSV and try again.")
                         st.stop()
                     init_activities_from_list(acts)
                     import_history(hist)
