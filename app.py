@@ -397,9 +397,9 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("Data will not change on refresh. Import only happens when you click the button.")
+    st.caption("All changes are saved automatically. Data will not change on refresh.")
 
-    # 确保唯一索引
+    # ---------- 确保唯一索引 ----------
     try:
         supabase.sql("ALTER TABLE checkins ADD CONSTRAINT IF NOT EXISTS checkins_date_activity_unique UNIQUE (checkin_date, activity_id);")
     except:
@@ -413,56 +413,65 @@ elif task.startswith("Task 6"):
         return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
     def parse_csv_final(uploaded_file):
-        """终极解析：智能定位标题行，不依赖固定行号"""
+        """针对当前CSV结构: 第一行Category, 第二行Activity, 第三行Budget, 第四行开始数据"""
         content = uploaded_file.read().decode("utf-8-sig")
-        # 使用 csv.reader 读取，自动处理引号
-        reader = csv.reader(content.splitlines())
-        lines = [row for row in reader if any(cell.strip() for cell in row)]  # 跳过全空行
-        if len(lines) < 4:
-            st.error("CSV must have at least 4 rows with content.")
+        reader = csv.reader(io.StringIO(content))
+        rows = list(reader)
+        if len(rows) < 4:
+            st.error("CSV must have at least 4 rows.")
             return None, None
 
-        # 寻找 Category 行和 Activity 行以及 Budget 行
-        cat_row_idx = act_row_idx = budget_row_idx = -1
-        for i, row in enumerate(lines):
-            # 检查第一个单元格是否包含关键词
-            first_cell = row[0].strip().lower() if row else ""
-            if 'category' in first_cell or 'mevb' in first_cell:
-                cat_row_idx = i
-            elif 'activity' in first_cell:
-                act_row_idx = i
-            elif 'budget' in first_cell or 'target' in first_cell:
-                budget_row_idx = i
-            if cat_row_idx >= 0 and act_row_idx >= 0 and budget_row_idx >= 0:
+        # 寻找 Category 行（包含 B/V/M/E）
+        cat_idx = None
+        for i, row in enumerate(rows):
+            for cell in row:
+                if cell.strip() in ("B","V","M","E"):
+                    cat_idx = i
+                    break
+            if cat_idx is not None:
+                break
+        if cat_idx is None:
+            st.error("Cannot find Category row.")
+            return None, None
+
+        act_idx = cat_idx + 1
+        budget_idx = act_idx + 1
+        if budget_idx >= len(rows):
+            st.error("Missing Budget row.")
+            return None, None
+
+        cat_line = rows[cat_idx]
+        act_line = rows[act_idx]
+        budget_line = rows[budget_idx]
+
+        # 确定数据起始列：第一个 Category 为 B/V/M/E 的列
+        start_col = 0
+        for i in range(len(cat_line)):
+            if cat_line[i].strip() in ("B","V","M","E"):
+                start_col = i
                 break
 
-        if cat_row_idx < 0 or act_row_idx < 0 or budget_row_idx < 0:
-            st.error("Could not find Category, Activity, and Budget rows. Ensure first column contains keywords 'MEVB Category', 'Activity', 'Budget'.")
-            return None, None
-
-        cat_row = lines[cat_row_idx]
-        act_row = lines[act_row_idx]
-        budget_row = lines[budget_row_idx]
-
-        # 活动从第1列开始（跳过第0列的标签）
         activities = []
-        for i in range(1, len(act_row)):
-            cat = cat_row[i].strip() if i < len(cat_row) else ""
-            name = act_row[i].strip() if i < len(act_row) else ""
-            if cat in ("B", "V", "M", "E") and name:
-                budget_str = budget_row[i].strip() if i < len(budget_row) and i < len(budget_row) else "0"
+        for i in range(start_col, len(act_line)):
+            if i >= len(cat_line):
+                break
+            cat = cat_line[i].strip()
+            name = act_line[i].strip()
+            if cat in ("B","V","M","E") and name:
                 try:
-                    budget = float(budget_str)
+                    budget = float(budget_line[i].strip()) if i < len(budget_line) and budget_line[i].strip() else 0.0
                 except:
                     budget = 0.0
                 activities.append({"name": name, "category": cat, "budget": budget})
 
-        # 数据行从 budget_row_idx + 1 开始
-        data_rows = lines[budget_row_idx + 1:]
+        if not activities:
+            st.error("No activities found. Check CSV.")
+            return None, None
+
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
         history = []
-        for row in data_rows:
+        for row in rows[budget_idx+1:]:
             if len(row) < 2:
                 continue
             date_str = row[0].strip()
@@ -481,9 +490,9 @@ elif task.startswith("Task 6"):
                 continue
             record_date = date(date.today().year, month, day)
             for idx, act in enumerate(activities):
-                col_idx = idx + 1
-                if col_idx < len(row):
-                    val = row[col_idx].strip().upper()
+                col = start_col + idx
+                if col < len(row):
+                    val = row[col].strip().upper()
                     if val in ("X", "1"):
                         achieved = 1.0
                     elif val.replace(".","",1).isdigit():
@@ -511,7 +520,6 @@ elif task.startswith("Task 6"):
             return
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
-        # 按日期分组，先删除再插入
         from collections import defaultdict
         date_entries = defaultdict(list)
         for rec in history_list:
@@ -532,30 +540,26 @@ elif task.startswith("Task 6"):
                     "achieved": e["achieved"]
                 }).execute()
 
-    # ---------- 初始化状态 ----------
+    # ---------- 初始化 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
-        st.warning("No activities found. Please upload your CSV to initialize.")
-        # 使用 key 管理上传组件，避免刷新重复
-        if "init_uploader_key" not in st.session_state:
-            st.session_state.init_uploader_key = 0
-        uploaded = st.file_uploader("Upload CSV", type="csv", key=f"init_{st.session_state.init_uploader_key}")
-        if st.button("Initialize Tracker"):
-            if uploaded is None:
+        st.warning("No activities found. Please upload your CSV.")
+        with st.form("init_form"):
+            uploaded_init = st.file_uploader("Upload CSV", type="csv")
+            submitted_init = st.form_submit_button("Initialize Tracker")
+        if submitted_init:
+            if uploaded_init is None:
                 st.error("Please select a CSV file first.")
             else:
-                acts, hist = parse_csv_final(uploaded)
+                acts, hist = parse_csv_final(uploaded_init)
                 if acts is None:
                     st.stop()
                 init_activities_from_list(acts)
                 import_history(hist)
-                st.success(f"Imported {len(acts)} activities, {len(hist)} history records.")
-                # 增加 key 以重置上传组件
-                st.session_state.init_uploader_key += 1
+                st.success(f"✅ Tracker initialized! Activities: {len(acts)}, History records: {len(hist)}")
                 st.rerun()
         st.stop()
 
-    # 正常模式
     activities = []
     for _, row in df_activities.iterrows():
         activities.append({
@@ -565,7 +569,7 @@ elif task.startswith("Task 6"):
             "budget": row["budget"]
         })
 
-    # 打卡 UI
+    # ---------- 打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
@@ -602,7 +606,7 @@ elif task.startswith("Task 6"):
         st.success("Saved!")
         st.rerun()
 
-    # YTD 看板
+    # ---------- YTD 看板 ----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
@@ -615,9 +619,9 @@ elif task.startswith("Task 6"):
         # 显示 Food 记录数
         food_act = df_activities[df_activities["name"].str.contains("Food", case=False)]
         if not food_act.empty:
-            fid = food_act.iloc[0]["id"]
-            fcnt = len(df_checkins[df_checkins["activity_id"] == fid])
-            st.caption(f"Food records in DB: {fcnt}")
+            food_id = food_act.iloc[0]["id"]
+            food_count = len(df_checkins[df_checkins["activity_id"] == food_id])
+            st.caption(f"✅ Food records in DB: {food_count}")
     else:
         actual = pd.DataFrame()
 
@@ -684,7 +688,7 @@ elif task.startswith("Task 6"):
     else:
         st.info("No check-ins this year yet.")
 
-    # 编辑 Budget
+    # ---------- 编辑 Budget ----------
     st.markdown("### ✏️ Edit Annual Budget")
     selected_act = st.selectbox("Select activity:", [a["name"] for a in activities])
     if selected_act:
@@ -695,25 +699,24 @@ elif task.startswith("Task 6"):
             st.success("Budget updated!")
             st.rerun()
 
-    # 重新导入（同样使用 key 重置）
+    # ---------- 重新导入 ----------
     st.markdown("### 📤 Re-import History from CSV")
-    if "reimport_uploader_key" not in st.session_state:
-        st.session_state.reimport_uploader_key = 0
-    uploaded_hist = st.file_uploader("Upload CSV", type="csv", key=f"reimport_{st.session_state.reimport_uploader_key}")
-    if st.button("Import History"):
-        if uploaded_hist is None:
+    with st.form("reimport_form"):
+        uploaded_history = st.file_uploader("Upload CSV", type="csv")
+        submitted_history = st.form_submit_button("Import History")
+    if submitted_history:
+        if uploaded_history is None:
             st.error("Please select a CSV file first.")
         else:
-            acts_parsed, hist_parsed = parse_csv_final(uploaded_hist)
+            acts_parsed, hist_parsed = parse_csv_final(uploaded_history)
             if acts_parsed is None:
                 st.stop()
             init_activities_from_list(acts_parsed)
             import_history(hist_parsed)
             st.success(f"History imported! {len(hist_parsed)} records upserted.")
-            st.session_state.reimport_uploader_key += 1
             st.rerun()
 
-    # 导出
+    # ---------- 导出 ----------
     st.markdown("### 📥 Export Data")
     if st.button("Generate Download Link"):
         full_res = supabase.table("checkins").select("*").execute()
