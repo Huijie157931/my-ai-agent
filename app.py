@@ -715,10 +715,29 @@ elif task.startswith("Task 6"):
     # ---------- 导出 ----------
     st.markdown("### 📥 Export Data")
     if st.button("Generate Download Link"):
-        full_res = supabase.table("checkins").select("*").execute()
-        if full_res.data:
-            df_all = pd.DataFrame(full_res.data)
-            df_all = df_all.merge(pd.DataFrame(activities)[["id", "name"]], left_on="activity_id", right_on="id")
+        # 分页获取所有 checkins 记录，避免 1000 行限制
+        all_data = []
+        page_size = 1000
+        offset = 0
+        while True:
+            res = (
+                supabase.table("checkins")
+                .select("*")
+                .range(offset, offset + page_size - 1)
+                .order("checkin_date", desc=False)
+                .execute()
+            )
+            batch = res.data or []
+            all_data.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        if all_data:
+            df_all = pd.DataFrame(all_data)
+            # 合并活动名称
+            df_act = pd.DataFrame(activities)[["id", "name"]]
+            df_all = df_all.merge(df_act, left_on="activity_id", right_on="id")
             pivot = df_all.pivot_table(
                 index="checkin_date", columns="name",
                 values="achieved", aggfunc="sum", fill_value=0,
