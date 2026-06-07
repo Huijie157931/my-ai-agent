@@ -397,28 +397,28 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically to the cloud database. Numbers update immediately after saving.")
+    st.caption("All changes are saved automatically. Use 'Refresh Data' if numbers seem stale.")
 
-    # ---------- 辅助函数（无缓存，每次实时查询）----------
+    # ---------- 辅助函数（无缓存）----------
     def load_activities_from_db():
         res = supabase.table("activities").select("*").order("id").execute()
         if res.data:
             return pd.DataFrame(res.data)
-        else:
-            return pd.DataFrame(columns=["id", "name", "category", "budget"])
+        return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
-    def parse_csv_to_activities_and_history(uploaded_file):
+    def parse_csv_v2(uploaded_file):
+        """解析新格式：第一行Category，第二行Activity，第三行Budget，第四行起为数据"""
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.reader(content.splitlines())
         lines = list(reader)
         if len(lines) < 4:
-            st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
+            st.error("CSV must have at least 4 rows (Category, Activity, Budget, data rows).")
             return None, None
 
-        cat_line = lines[1]
-        act_line = lines[2]
-        tgt_line = lines[3] if len(lines) > 3 else []
-
+        cat_line = lines[0]          # B, B, B, ...
+        act_line = lines[1]          # Food & Water & Self care, ...
+        tgt_line = lines[2]          # 330, 280, ...
+        # 活动从第1列开始（第0列是标签，例如 'MEVB Category' 或 'Activity'，忽略）
         activities = []
         for i in range(1, len(act_line)):
             cat = cat_line[i].strip() if i < len(cat_line) else ""
@@ -434,8 +434,8 @@ elif task.startswith("Task 6"):
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
         history = []
-        for row in lines[4:]:
-            if not row or len(row) < 2:
+        for row in lines[3:]:          # 从第四行开始是数据
+            if len(row) < 2:
                 continue
             date_str = row[0].strip()
             if not date_str:
@@ -494,18 +494,22 @@ elif task.startswith("Task 6"):
                 "achieved": rec["achieved"]
             }, on_conflict="checkin_date, activity_id").execute()
 
-    # ---------- 加载活动列表 ----------
+    # ---------- 强制刷新按钮 ----------
+    if st.sidebar.button("🔄 Refresh Data from Database"):
+        st.rerun()
+
+    # ---------- 加载活动 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
         st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
         uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
         if uploaded is not None:
-            acts, hist = parse_csv_to_activities_and_history(uploaded)
+            acts, hist = parse_csv_v2(uploaded)
             if acts is None:
                 st.stop()
             init_activities_from_list(acts)
             import_history(hist)
-            st.success("Activities and history imported! Refreshing...")
+            st.success(f"Imported {len(acts)} activities and {len(hist)} history records. Refreshing...")
             st.rerun()
         st.stop()
 
@@ -523,7 +527,6 @@ elif task.startswith("Task 6"):
     selected_date = st.date_input("Pick a date", date.today())
     st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
 
-    # 实时查询该日期打卡记录
     checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
     day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
 
@@ -542,7 +545,6 @@ elif task.startswith("Task 6"):
             if checked:
                 total_checked += 1
 
-    # 今日打卡计数
     st.markdown(f"**✅ Today's check-in count: {total_checked} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
@@ -554,12 +556,11 @@ elif task.startswith("Task 6"):
                     "activity_id": act_id,
                     "achieved": achieved
                 }).execute()
-        st.success("Check-in saved! Dashboard will now update.")
-        # 确保数据库写入完成
+        st.success("Check-in saved! Refreshing...")
         time.sleep(0.5)
         st.rerun()
 
-    # ---------- YTD 看板（实时查询，无缓存）----------
+    # ---------- YTD 看板（实时查询）----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
@@ -633,7 +634,7 @@ elif task.startswith("Task 6"):
             )
             st.dataframe(styled_cat, use_container_width=True)
     else:
-        st.info("No check-ins this year yet. Start by saving today's activities!")
+        st.info("No check-ins this year yet.")
 
     # ---------- 编辑 Budget ----------
     st.markdown("### ✏️ Edit Annual Budget")
@@ -643,20 +644,19 @@ elif task.startswith("Task 6"):
         new_budget = st.number_input(f"New budget for {selected_act}", value=int(act["budget"]), min_value=0)
         if st.button("Update Budget"):
             supabase.table("activities").update({"budget": new_budget}).eq("id", act["id"]).execute()
-            st.success(f"Budget updated!")
+            st.success("Budget updated! Refreshing...")
             st.rerun()
 
-    # ---------- 批量上传 CSV ----------
-    st.markdown("### 📤 Upload CSV to Import / Update History")
-    st.caption("Re-upload your CSV any time. Duplicate dates will be updated, not added.")
-    uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
+    # ---------- 重新上传 CSV 更新历史 ----------
+    st.markdown("### 📤 Re-upload CSV to Refresh All History")
+    uploaded_history = st.file_uploader("Upload CSV (new format)", type="csv", key="history_upload")
     if uploaded_history is not None:
-        acts_parsed, hist_parsed = parse_csv_to_activities_and_history(uploaded_history)
+        acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
         if acts_parsed is None:
             st.stop()
         init_activities_from_list(acts_parsed)
         import_history(hist_parsed)
-        st.success(f"History imported! {len(hist_parsed)} records upserted. Dashboard should now match your CSV.")
+        st.success(f"History refreshed! {len(hist_parsed)} records upserted.")
         st.rerun()
 
     # ---------- 导出备份 ----------
