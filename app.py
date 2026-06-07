@@ -496,6 +496,9 @@ elif task.startswith("Task 6"):
     # ---------- 侧边栏工具 ----------
     if st.sidebar.button("🔄 Recalculate YTD from DB"):
         st.rerun()
+    if st.sidebar.button("🗑️ Reset Import State (allow re-import same file)"):
+        st.session_state.pop("last_uploaded_name", None)
+        st.rerun()
 
     # ---------- 加载活动 ----------
     df_activities = load_activities_from_db()
@@ -503,13 +506,20 @@ elif task.startswith("Task 6"):
         st.warning("No activities found. Upload your CSV first.")
         uploaded = st.file_uploader("Upload CSV", type="csv", key="init_upload")
         if uploaded is not None:
-            acts, hist = parse_csv_v2(uploaded)
-            if acts is None:
-                st.stop()
-            init_activities_from_list(acts)
-            import_history(hist)
-            st.success(f"Imported {len(acts)} activities and {len(hist)} history records.")
-            st.rerun()
+            # 防止重复处理同一个文件
+            current_name = uploaded.name
+            last_name = st.session_state.get("last_init_upload")
+            if current_name != last_name:
+                acts, hist = parse_csv_v2(uploaded)
+                if acts is None:
+                    st.stop()
+                init_activities_from_list(acts)
+                import_history(hist)
+                st.session_state["last_init_upload"] = current_name
+                st.success(f"Imported {len(acts)} activities and {len(hist)} history records.")
+                st.rerun()
+            else:
+                st.info("This file has already been imported. Upload a new file or reset import state.")
         st.stop()
 
     activities = []
@@ -549,7 +559,6 @@ elif task.startswith("Task 6"):
     st.markdown(f"**✅ Today's count: {total_checked} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
-        # 仅删除该日期的记录，然后重新插入
         supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).execute()
         for act_id, achieved in updated_entries.items():
             if achieved > 0:
@@ -572,8 +581,7 @@ elif task.startswith("Task 6"):
         df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
         df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
         actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
-        # 调试：显示数据库总记录数
-        st.caption(f"Total check-in records in DB this year: {len(df_checkins)}")
+        st.caption(f"Total DB records this year: {len(df_checkins)}")
     else:
         actual = pd.DataFrame()
 
@@ -651,17 +659,23 @@ elif task.startswith("Task 6"):
             st.success("Budget updated!")
             st.rerun()
 
-    # ---------- 重新导入 CSV ----------
+    # ---------- 重新导入 CSV（防重复）----------
     st.markdown("### 📤 Re-upload CSV to Refresh All History")
     uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
     if uploaded_history is not None:
-        acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
-        if acts_parsed is None:
-            st.stop()
-        init_activities_from_list(acts_parsed)
-        import_history(hist_parsed)
-        st.success(f"History refreshed! {len(hist_parsed)} records upserted.")
-        st.rerun()
+        current_name = uploaded_history.name
+        last_name = st.session_state.get("last_history_upload")
+        if current_name != last_name:
+            acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
+            if acts_parsed is None:
+                st.stop()
+            init_activities_from_list(acts_parsed)
+            import_history(hist_parsed)
+            st.session_state["last_history_upload"] = current_name
+            st.success(f"History refreshed! {len(hist_parsed)} records upserted.")
+            st.rerun()
+        else:
+            st.info("This file has already been imported. Upload a new file or reset import state.")
 
     # ---------- 导出备份 ----------
     st.markdown("### 📥 Export Data")
