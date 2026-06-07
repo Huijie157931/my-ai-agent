@@ -397,7 +397,7 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically. Use 'Refresh Data' if numbers seem stale.")
+    st.caption("All changes are saved automatically. Click 'Refresh Data' if numbers seem stale.")
 
     # ---------- 辅助函数（无缓存）----------
     def load_activities_from_db():
@@ -407,7 +407,6 @@ elif task.startswith("Task 6"):
         return pd.DataFrame(columns=["id", "name", "category", "budget"])
 
     def parse_csv_v2(uploaded_file):
-        """解析新格式：第一行Category，第二行Activity，第三行Budget，第四行起为数据"""
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.reader(content.splitlines())
         lines = list(reader)
@@ -415,10 +414,9 @@ elif task.startswith("Task 6"):
             st.error("CSV must have at least 4 rows (Category, Activity, Budget, data rows).")
             return None, None
 
-        cat_line = lines[0]          # B, B, B, ...
-        act_line = lines[1]          # Food & Water & Self care, ...
-        tgt_line = lines[2]          # 330, 280, ...
-        # 活动从第1列开始（第0列是标签，例如 'MEVB Category' 或 'Activity'，忽略）
+        cat_line = lines[0]
+        act_line = lines[1]
+        tgt_line = lines[2]
         activities = []
         for i in range(1, len(act_line)):
             cat = cat_line[i].strip() if i < len(cat_line) else ""
@@ -434,7 +432,7 @@ elif task.startswith("Task 6"):
         month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
                      "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
         history = []
-        for row in lines[3:]:          # 从第四行开始是数据
+        for row in lines[3:]:
             if len(row) < 2:
                 continue
             date_str = row[0].strip()
@@ -455,8 +453,8 @@ elif task.startswith("Task 6"):
             for idx, act in enumerate(activities):
                 col_idx = idx + 1
                 if col_idx < len(row):
-                    val = row[col_idx].strip().upper()
-                    if val in ("X", "1"):
+                    val = row[col_idx].strip()
+                    if val == "1" or val.upper() == "X":
                         achieved = 1.0
                     elif val.replace(".","",1).isdigit():
                         achieved = float(val)
@@ -465,7 +463,7 @@ elif task.startswith("Task 6"):
                     if achieved > 0:
                         history.append({
                             "date": record_date,
-                            "activity_name": act["name"],
+                            "activity_name": act["name"],   # 已 trim
                             "achieved": achieved
                         })
         return activities, history
@@ -507,6 +505,9 @@ elif task.startswith("Task 6"):
             acts, hist = parse_csv_v2(uploaded)
             if acts is None:
                 st.stop()
+            # 清空旧数据再导入（避免残留错误 ID）
+            supabase.table("checkins").delete().neq("id", -1).execute()   # 删除所有打卡记录
+            supabase.table("activities").delete().neq("id", -1).execute() # 删除所有活动
             init_activities_from_list(acts)
             import_history(hist)
             st.success(f"Imported {len(acts)} activities and {len(hist)} history records. Refreshing...")
@@ -560,11 +561,16 @@ elif task.startswith("Task 6"):
         time.sleep(0.5)
         st.rerun()
 
-    # ---------- YTD 看板（实时查询）----------
+    # ---------- YTD 看板（显式查询所有数据）----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
-    res = supabase.table("checkins").select("checkin_date, activity_id, achieved").gte("checkin_date", year_start).lte("checkin_date", today_iso).execute()
+
+    # 直接查询所有今年数据，不加限制
+    res = supabase.table("checkins").select("checkin_date, activity_id, achieved", count="exact").gte("checkin_date", year_start).lte("checkin_date", today_iso).order("checkin_date").limit(10000).execute()
+    # 调试：显示查询到的行数（部署后可注释掉）
+    st.write(f"📊 {len(res.data)} check-in records found for this year.")
+
     if res.data:
         df_checkins = pd.DataFrame(res.data)
         df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
@@ -649,11 +655,15 @@ elif task.startswith("Task 6"):
 
     # ---------- 重新上传 CSV 更新历史 ----------
     st.markdown("### 📤 Re-upload CSV to Refresh All History")
+    st.caption("This will replace all current check-in data with the CSV contents.")
     uploaded_history = st.file_uploader("Upload CSV (new format)", type="csv", key="history_upload")
     if uploaded_history is not None:
         acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
         if acts_parsed is None:
             st.stop()
+        # 清空现有数据
+        supabase.table("checkins").delete().neq("id", -1).execute()
+        supabase.table("activities").delete().neq("id", -1).execute()
         init_activities_from_list(acts_parsed)
         import_history(hist_parsed)
         st.success(f"History refreshed! {len(hist_parsed)} records upserted.")
