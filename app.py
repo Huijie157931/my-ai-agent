@@ -403,7 +403,7 @@ elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
     st.caption("All changes are saved automatically. Data will not change on refresh.")
 
-    # ---------- 硬编码活动定义（顺序与你原 CSV 一致）----------
+    # ---------- 硬编码活动定义（顺序与你原 CSV 一致，已去除尾部空格）----------
     DEFAULT_ACTIVITIES = [
         {"name": "Food & Water & Self care", "category": "B", "budget": 330},
         {"name": "Energy, Focus and Emotion", "category": "B", "budget": 280},
@@ -422,9 +422,9 @@ elif task.startswith("Task 6"):
         {"name": "Play/Exhibits/lecture", "category": "M", "budget": 25},
         {"name": "Meet new people", "category": "E", "budget": 25},
         {"name": "Deep exposure to nature", "category": "E", "budget": 15},
-        {"name": "Quarterly Review", "category": "V", "budget": 4},   # 已去除尾部空格
+        {"name": "Quarterly Review", "category": "V", "budget": 4},       # 尾部空格已去除
         {"name": "CV & Jobs", "category": "M", "budget": 6},
-        {"name": "Yearly Review + Plan", "category": "V", "budget": 2}, # 已去除尾部空格
+        {"name": "Yearly Review + Plan", "category": "V", "budget": 2},   # 尾部空格已去除
         {"name": "Annual leave", "category": "V", "budget": 20},
         {"name": "Family Gathering", "category": "E", "budget": 20},
         {"name": "Health Check", "category": "B", "budget": 8},
@@ -448,20 +448,14 @@ elif task.startswith("Task 6"):
                 "budget": act["budget"]
             }, on_conflict="name").execute()
 
-    # ---------- 解析纯数据 CSV ----------
+    # ---------- 解析纯数据 CSV（强制只读前33列）----------
     def parse_data_csv(uploaded_file):
-        """
-        纯数据 CSV 格式：
-          - 第 1 列：日期 (Jan 1)
-          - 第 2~33 列：对应 32 个活动的完成情况（1 或空），列顺序必须与 DEFAULT_ACTIVITIES 一致
-          - 无任何表头行
-        """
         content = uploaded_file.read().decode("utf-8-sig")
-        reader = csv.reader(io.StringIO(content))
+        # 自动检测分隔符
+        sniffer = csv.Sniffer()
+        delimiter = sniffer.sniff(content[:1024]).delimiter if content.strip() else ','
+        reader = csv.reader(io.StringIO(content), delimiter=delimiter)
         rows = list(reader)
-        if len(rows) < 1:
-            st.error("CSV must contain at least one data row.")
-            return None
 
         month_map = {
             "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
@@ -474,6 +468,8 @@ elif task.startswith("Task 6"):
         for row in rows:
             if not row or not row[0].strip():
                 continue
+            # 只取前33列（日期 + 32个活动），忽略多余列
+            row = row[:33]
             date_str = row[0].strip()
             parts = date_str.split()
             if len(parts) != 2:
@@ -488,7 +484,7 @@ elif task.startswith("Task 6"):
             except (ValueError, TypeError):
                 continue
 
-            for idx in range(32):   # 共 32 个活动
+            for idx in range(32):
                 col = idx + 1
                 if col >= len(row):
                     break
@@ -531,7 +527,7 @@ elif task.startswith("Task 6"):
         st.success("Activities initialised from built‑in list.")
         st.rerun()
 
-    activities = df_act.data  # 从数据库读取，包含 id
+    activities = df_act.data
 
     # ---------- 每日打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
@@ -678,7 +674,7 @@ elif task.startswith("Task 6"):
 
     # ---------- 导入历史数据 ----------
     st.markdown("### 📤 Import History from Data-Only CSV")
-    st.caption("Upload a CSV with only dates and 1/empty flags (no headers), columns must match the built‑in order.")
+    st.caption("Upload your data CSV (dates in first column, 32 data columns). Extra columns will be ignored.")
     with st.form("reimport"):
         up_hist = st.file_uploader("Upload Data CSV", type="csv")
         if st.form_submit_button("Import History") and up_hist is not None:
