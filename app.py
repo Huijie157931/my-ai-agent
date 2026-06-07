@@ -397,7 +397,7 @@ elif task.startswith("Task 5"):
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically. Click 'Refresh Data' if numbers seem stale.")
+    st.caption("All changes are saved automatically. Use 'Recalculate YTD' if numbers seem off.")
 
     # ---------- 辅助函数（无缓存）----------
     def load_activities_from_db():
@@ -416,7 +416,8 @@ elif task.startswith("Task 6"):
 
         cat_line = lines[0]
         act_line = lines[1]
-        tgt_line = lines[2]
+        tgt_line = lines[2] if len(lines) > 2 else []
+
         activities = []
         for i in range(1, len(act_line)):
             cat = cat_line[i].strip() if i < len(cat_line) else ""
@@ -453,8 +454,8 @@ elif task.startswith("Task 6"):
             for idx, act in enumerate(activities):
                 col_idx = idx + 1
                 if col_idx < len(row):
-                    val = row[col_idx].strip()
-                    if val == "1" or val.upper() == "X":
+                    val = row[col_idx].strip().upper()
+                    if val in ("X", "1"):
                         achieved = 1.0
                     elif val.replace(".","",1).isdigit():
                         achieved = float(val)
@@ -463,7 +464,7 @@ elif task.startswith("Task 6"):
                     if achieved > 0:
                         history.append({
                             "date": record_date,
-                            "activity_name": act["name"],   # 已 trim
+                            "activity_name": act["name"],
                             "achieved": achieved
                         })
         return activities, history
@@ -492,25 +493,22 @@ elif task.startswith("Task 6"):
                 "achieved": rec["achieved"]
             }, on_conflict="checkin_date, activity_id").execute()
 
-    # ---------- 强制刷新按钮 ----------
-    if st.sidebar.button("🔄 Refresh Data from Database"):
+    # ---------- 侧边栏工具 ----------
+    if st.sidebar.button("🔄 Recalculate YTD from DB"):
         st.rerun()
 
     # ---------- 加载活动 ----------
     df_activities = load_activities_from_db()
     if df_activities.empty:
-        st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
-        uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
+        st.warning("No activities found. Upload your CSV first.")
+        uploaded = st.file_uploader("Upload CSV", type="csv", key="init_upload")
         if uploaded is not None:
             acts, hist = parse_csv_v2(uploaded)
             if acts is None:
                 st.stop()
-            # 清空旧数据再导入（避免残留错误 ID）
-            supabase.table("checkins").delete().neq("id", -1).execute()   # 删除所有打卡记录
-            supabase.table("activities").delete().neq("id", -1).execute() # 删除所有活动
             init_activities_from_list(acts)
             import_history(hist)
-            st.success(f"Imported {len(acts)} activities and {len(hist)} history records. Refreshing...")
+            st.success(f"Imported {len(acts)} activities and {len(hist)} history records.")
             st.rerun()
         st.stop()
 
@@ -536,8 +534,10 @@ elif task.startswith("Task 6"):
     updated_entries = {}
     total_checked = 0
     for cat in categories:
-        st.markdown(f"**{col_cat[cat]}**")
         cat_acts = [a for a in activities if a["category"] == cat]
+        if not cat_acts:
+            continue
+        st.markdown(f"**{col_cat[cat]}**")
         cols = st.columns(len(cat_acts))
         for i, act in enumerate(cat_acts):
             current_val = day_map.get(act["id"], 0)
@@ -546,36 +546,34 @@ elif task.startswith("Task 6"):
             if checked:
                 total_checked += 1
 
-    st.markdown(f"**✅ Today's check-in count: {total_checked} / {len(activities)}**")
+    st.markdown(f"**✅ Today's count: {total_checked} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
+        # 仅删除该日期的记录，然后重新插入
+        supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).execute()
         for act_id, achieved in updated_entries.items():
-            supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).eq("activity_id", act_id).execute()
             if achieved > 0:
                 supabase.table("checkins").insert({
                     "checkin_date": selected_date.isoformat(),
                     "activity_id": act_id,
                     "achieved": achieved
                 }).execute()
-        st.success("Check-in saved! Refreshing...")
+        st.success("Saved! Refreshing...")
         time.sleep(0.5)
         st.rerun()
 
-    # ---------- YTD 看板（显式查询所有数据）----------
+    # ---------- YTD 看板（实时查询）----------
     st.markdown("### 📊 Year-to-Date Progress")
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
-
-    # 直接查询所有今年数据，不加限制
-    res = supabase.table("checkins").select("checkin_date, activity_id, achieved", count="exact").gte("checkin_date", year_start).lte("checkin_date", today_iso).order("checkin_date").limit(10000).execute()
-    # 调试：显示查询到的行数（部署后可注释掉）
-    st.write(f"📊 {len(res.data)} check-in records found for this year.")
-
+    res = supabase.table("checkins").select("checkin_date, activity_id, achieved").gte("checkin_date", year_start).lte("checkin_date", today_iso).execute()
     if res.data:
         df_checkins = pd.DataFrame(res.data)
         df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
         df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
         actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
+        # 调试：显示数据库总记录数
+        st.caption(f"Total check-in records in DB this year: {len(df_checkins)}")
     else:
         actual = pd.DataFrame()
 
@@ -644,26 +642,22 @@ elif task.startswith("Task 6"):
 
     # ---------- 编辑 Budget ----------
     st.markdown("### ✏️ Edit Annual Budget")
-    selected_act = st.selectbox("Select activity to modify:", [a["name"] for a in activities])
+    selected_act = st.selectbox("Select activity:", [a["name"] for a in activities])
     if selected_act:
         act = next(a for a in activities if a["name"] == selected_act)
         new_budget = st.number_input(f"New budget for {selected_act}", value=int(act["budget"]), min_value=0)
         if st.button("Update Budget"):
             supabase.table("activities").update({"budget": new_budget}).eq("id", act["id"]).execute()
-            st.success("Budget updated! Refreshing...")
+            st.success("Budget updated!")
             st.rerun()
 
-    # ---------- 重新上传 CSV 更新历史 ----------
+    # ---------- 重新导入 CSV ----------
     st.markdown("### 📤 Re-upload CSV to Refresh All History")
-    st.caption("This will replace all current check-in data with the CSV contents.")
-    uploaded_history = st.file_uploader("Upload CSV (new format)", type="csv", key="history_upload")
+    uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
     if uploaded_history is not None:
         acts_parsed, hist_parsed = parse_csv_v2(uploaded_history)
         if acts_parsed is None:
             st.stop()
-        # 清空现有数据
-        supabase.table("checkins").delete().neq("id", -1).execute()
-        supabase.table("activities").delete().neq("id", -1).execute()
         init_activities_from_list(acts_parsed)
         import_history(hist_parsed)
         st.success(f"History refreshed! {len(hist_parsed)} records upserted.")
