@@ -415,7 +415,7 @@ elif task.startswith("Task 6"):
     from datetime import date
 
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically. Data will not change on refresh.")
+    st.caption("All changes are saved automatically.")
 
     # ---------- 硬编码活动定义（顺序与你原 CSV 一致，已去除尾部空格）----------
     DEFAULT_ACTIVITIES = [
