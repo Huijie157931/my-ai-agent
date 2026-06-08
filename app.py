@@ -37,19 +37,39 @@ def safe_tz_convert(df, tz_name):
     return df
 
 def plot_intraday(name, ticker, tz_name):
+    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌）"""
     try:
-        df = yf.Ticker(ticker).history(period="1d", interval="5m")
-        if df.empty or len(df) < 2:
-            fig, ax = plt.subplots(figsize=(3.5, 1.8))
-            ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
-            ax.set_title(f"{name} (Real-Time)", fontsize=8)
-            st.pyplot(fig)
-            return
+        # 获取近5日数据以取得前一交易日收盘价
+        df_5d = yf.Ticker(ticker).history(period="5d")
+        if df_5d.empty or len(df_5d) < 2:
+            # 无法获取前收盘，降级为与开盘价比较
+            df = yf.Ticker(ticker).history(period="1d", interval="5m")
+            if df.empty or len(df) < 2:
+                fig, ax = plt.subplots(figsize=(3.5, 1.8))
+                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
+                ax.set_title(f"{name} (Real-Time)", fontsize=8)
+                st.pyplot(fig)
+                return
+            open_price = df['Open'].iloc[0]
+            last_price = df['Close'].iloc[-1]
+            change = (last_price - open_price) / open_price * 100
+            line_color = "red" if change >= 0 else "green"
+        else:
+            prev_close = df_5d['Close'].iloc[-2]  # 前一交易日收盘价
+            df = yf.Ticker(ticker).history(period="1d", interval="5m")
+            if df.empty or len(df) < 2:
+                fig, ax = plt.subplots(figsize=(3.5, 1.8))
+                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
+                ax.set_title(f"{name} (Real-Time)", fontsize=8)
+                st.pyplot(fig)
+                return
+            last_price = df['Close'].iloc[-1]
+            change = (last_price - prev_close) / prev_close * 100
+            line_color = "red" if change >= 0 else "green"
+
+        # 时区转换
+        df.index = df.index.tz_localize(None)  # 先移除可能的时区，再统一处理
         df = safe_tz_convert(df, tz_name)
-        open_price = df['Open'].iloc[0]
-        last_price = df['Close'].iloc[-1]
-        change = (last_price - open_price) / open_price * 100
-        line_color = "red" if change >= 0 else "green"
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
