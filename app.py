@@ -26,7 +26,7 @@ st.title("🤖 Personal AI Assistant – Full Demo")
 today_date = date.today().strftime("%B %d, %Y")
 st.caption(f"📅 {today_date}")
 
-# ---------- 辅助绘图函数（时区安全，分时图颜色基于前收盘）----------
+# ---------- 辅助绘图函数（不变）----------
 def safe_tz_convert(df, tz_name):
     if df.empty:
         return df
@@ -37,39 +37,19 @@ def safe_tz_convert(df, tz_name):
     return df
 
 def plot_intraday(name, ticker, tz_name):
-    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌）"""
     try:
-        # 获取近5日数据以取得前一交易日收盘价
-        df_5d = yf.Ticker(ticker).history(period="5d")
-        if df_5d.empty or len(df_5d) < 2:
-            # 无法获取前收盘，降级为与开盘价比较
-            df = yf.Ticker(ticker).history(period="1d", interval="5m")
-            if df.empty or len(df) < 2:
-                fig, ax = plt.subplots(figsize=(3.5, 1.8))
-                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
-                ax.set_title(f"{name} (Real-Time)", fontsize=8)
-                st.pyplot(fig)
-                return
-            open_price = df['Open'].iloc[0]
-            last_price = df['Close'].iloc[-1]
-            change = (last_price - open_price) / open_price * 100
-            line_color = "red" if change >= 0 else "green"
-        else:
-            prev_close = df_5d['Close'].iloc[-2]  # 前一交易日收盘价
-            df = yf.Ticker(ticker).history(period="1d", interval="5m")
-            if df.empty or len(df) < 2:
-                fig, ax = plt.subplots(figsize=(3.5, 1.8))
-                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
-                ax.set_title(f"{name} (Real-Time)", fontsize=8)
-                st.pyplot(fig)
-                return
-            last_price = df['Close'].iloc[-1]
-            change = (last_price - prev_close) / prev_close * 100
-            line_color = "red" if change >= 0 else "green"
-
-        # 时区转换
-        df.index = df.index.tz_localize(None)  # 先移除可能的时区，再统一处理
+        df = yf.Ticker(ticker).history(period="1d", interval="5m")
+        if df.empty or len(df) < 2:
+            fig, ax = plt.subplots(figsize=(3.5, 1.8))
+            ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
+            ax.set_title(f"{name} (Real-Time)", fontsize=8)
+            st.pyplot(fig)
+            return
         df = safe_tz_convert(df, tz_name)
+        open_price = df['Open'].iloc[0]
+        last_price = df['Close'].iloc[-1]
+        change = (last_price - open_price) / open_price * 100
+        line_color = "red" if change >= 0 else "green"
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
@@ -84,7 +64,6 @@ def plot_intraday(name, ticker, tz_name):
         st.pyplot(fig)
 
 def plot_monthly(name, ticker, tz_name):
-    """绘制一个月趋势图，颜色基于整体涨跌（红涨绿跌）"""
     try:
         df = yf.Ticker(ticker).history(period="1mo")
         if df.empty or len(df) < 2:
@@ -127,38 +106,38 @@ task = st.sidebar.selectbox(
 # ==================== TASK 1 ====================
 if task.startswith("Task 1"):
     st.subheader("📰 Today’s German Learning Sentence")
-    st.caption("Based on a real news headline from BBC")
-    bbc_rss = "http://feeds.bbci.co.uk/news/rss.xml"
-    news_title = ""
-    news_link = ""
-    try:
-        feed = feedparser.parse(bbc_rss)
-        if feed.entries:
-            chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
-            news_title = chosen.title
-            news_link = chosen.link
-    except:
-        news_title = "Unable to fetch news"
+    st.caption("Based on a real headline from Die Zeit · Free API: 20 requests/day")
+
+    if st.button("Generate Today's Sentence"):
+        # 每次点击重新抓取一条新标题
+        zeit_rss = "https://newsfeed.zeit.de/all"
+        news_title = ""
         news_link = ""
+        try:
+            feed = feedparser.parse(zeit_rss)
+            if feed.entries:
+                chosen = random.choice(feed.entries[:5]) if len(feed.entries) >= 5 else feed.entries[0]
+                news_title = chosen.title
+                news_link = chosen.link
+        except:
+            news_title = "Unable to fetch news"
+            news_link = ""
 
-    if news_title:
-        st.markdown(f"**📌 Today's headline:** {news_title}")
-        if news_link:
-            st.markdown(f"[🔗 Read full article]({news_link})")
-    else:
-        st.warning("Could not fetch latest news. Using generic prompt.")
+        if news_title and news_title != "Unable to fetch news":
+            st.markdown(f"**📌 Today's headline (German):** {news_title}")
+            if news_link:
+                st.markdown(f"[🔗 Read full article]({news_link})")
+        else:
+            st.warning("Could not fetch latest news. Using generic prompt.")
 
-    if st.button("Generate Sentence"):
-        with st.spinner("Generating..."):
+        with st.spinner("Generating explanation..."):
             prompt = (
-                f"Today is {today_date}. The reference news headline is: '{news_title}'. "
-                "Based on this exact news topic, generate: "
-                "1) A single German sentence at A2 level. "
-                "2) Its accurate English translation. "
-                "3) 3-5 key German words from the sentence, each with its English meaning and a short example phrase. Format as 'Word (part of speech): meaning | Example: ...' "
-                "4) One brief grammar explanation (in English). "
+                f"The German news headline is: '{news_title}'. "
+                "Please provide:\n"
+                "1) An accurate English translation of this headline.\n"
+                "2) 3-5 key German words from the headline, each with its English meaning and a short example phrase. Format as 'Word (part of speech): meaning | Example: ...'\n"
+                "3) One brief grammar explanation (in English) highlighting a structure used in the headline.\n"
                 "Format exactly:\n"
-                "German: <sentence>\n"
                 "English: <translation>\n"
                 "Vocabulary:\n"
                 "- <Word1 (pos)>: <meaning> | Example: <example>\n"
@@ -169,14 +148,12 @@ if task.startswith("Task 1"):
                 response = model.generate_content(prompt)
                 text = response.text
                 lines = text.split("\n")
-                german = english = grammar = ""
+                english = grammar = ""
                 vocab = []
                 mode = None
                 for line in lines:
                     line = line.strip()
-                    if line.startswith("German:"):
-                        german = line.replace("German:", "").strip()
-                    elif line.startswith("English:"):
+                    if line.startswith("English:"):
                         english = line.replace("English:", "").strip()
                     elif line.startswith("Grammar:"):
                         grammar = line.replace("Grammar:", "").strip()
@@ -184,23 +161,27 @@ if task.startswith("Task 1"):
                         mode = "vocab"
                     elif mode == "vocab" and line.startswith("-"):
                         vocab.append(line.lstrip("- ").strip())
-                if german:
-                    st.success(f"**🇩🇪 German:** {german}")
-                    tts_html = f"""
-                    <div style="margin-top:8px;">
-                        <button onclick="speak()" style="padding:6px 12px; font-size:14px;">🔊 Listen</button>
-                    </div>
-                    <script>
-                    function speak() {{
-                        var msg = new SpeechSynthesisUtterance();
-                        msg.text = `{german}`;
-                        msg.lang = 'de-DE';
-                        msg.rate = 0.9;
-                        window.speechSynthesis.speak(msg);
-                    }}
-                    </script>
-                    """
-                    components.html(tts_html, height=60)
+
+                # 显示德语原文（即标题）
+                st.success(f"**🇩🇪 German:** {news_title}")
+
+                # 语音朗读德语标题
+                tts_html = f"""
+                <div style="margin-top:8px;">
+                    <button onclick="speak()" style="padding:6px 12px; font-size:14px;">🔊 Listen</button>
+                </div>
+                <script>
+                function speak() {{
+                    var msg = new SpeechSynthesisUtterance();
+                    msg.text = `{news_title}`;
+                    msg.lang = 'de-DE';
+                    msg.rate = 0.9;
+                    window.speechSynthesis.speak(msg);
+                }}
+                </script>
+                """
+                components.html(tts_html, height=60)
+
                 if english:
                     st.info(f"**🇬🇧 English:** {english}")
                 if vocab:
@@ -209,11 +190,15 @@ if task.startswith("Task 1"):
                         st.markdown(f"- {v}")
                 if grammar:
                     st.markdown(f"**📐 Grammar Note:** {grammar}")
-            except Exception as e:
-                st.error(f"API error: {e}")
-    else:
-        st.info("Click the button to generate a sentence based on today’s news.")
 
+            except Exception as e:
+                err = str(e)
+                if "429" in err or "ResourceExhausted" in err:
+                    st.error("⚠️ Daily free API quota exhausted (20 requests). Please try again tomorrow, or upgrade your API plan.")
+                else:
+                    st.error(f"API error: {e}")
+    else:
+        st.info("Click 'Generate Today's Sentence' to get a new headline from Die Zeit with translation, vocabulary, and grammar.")
 # ==================== TASK 2 ====================
 elif task.startswith("Task 2"):
     st.subheader("📈 Major Stock Indices")
@@ -230,12 +215,15 @@ elif task.startswith("Task 2"):
         for region, names in stocks.items():
             for name, ticker in names.items():
                 try:
+                    # 获取最近 5 天的数据，用于计算昨日收盘价和今日最新价
                     df = yf.Ticker(ticker).history(period="5d")
                     if df.empty or len(df) < 2:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
 
+                    # 最新价（今日收盘价或实时价）
                     last_price = df['Close'].iloc[-1]
+                    # 前一交易日收盘价
                     prev_close = df['Close'].iloc[-2]
                     change = (last_price - prev_close) / prev_close * 100
 
@@ -245,6 +233,7 @@ elif task.startswith("Task 2"):
                 except:
                     rows.append((name, "Error", "-", "gray"))
 
+        # 生成表格
         html = "<table style='width:100%; border-collapse: collapse;'>"
         html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
         for name, price, chg, color in rows:
@@ -252,6 +241,7 @@ elif task.startswith("Task 2"):
         html += "</table>"
         st.markdown(html, unsafe_allow_html=True)
 
+        # 当日分时图（左：A股/港股 北京时间，右：美股 纽约时间）
         col_left, col_right = st.columns([1, 1])
         with col_left:
             st.markdown("**🇨🇳 A-Share / HK (Beijing Time)**")
@@ -264,6 +254,7 @@ elif task.startswith("Task 2"):
             plot_intraday("S&P 1500", "^SP1500", "America/New_York")
             plot_intraday("Dow Jones", "^DJI", "America/New_York")
 
+        # 一个月趋势图（同样按对应时区）
         st.markdown("**📅 1-Month Trend**")
         col_trend_left, col_trend_right = st.columns([1, 1])
         with col_trend_left:
@@ -419,50 +410,79 @@ elif task.startswith("Task 5"):
 
 # ==================== TASK 6 (Supabase 版) ====================
 elif task.startswith("Task 6"):
+    import csv, io
+    from collections import defaultdict
+    from datetime import date
+
     st.subheader("🏋️ Daily Activity Check-in & YTD Dashboard")
-    st.caption("All changes are saved automatically.")
+    st.caption("All changes are saved automatically. Data will not change on refresh.")
 
-    @st.cache_data(ttl=2)
-    def load_activities_from_db():
-        res = supabase.table("activities").select("*").order("id").execute()
-        if res.data:
-            return pd.DataFrame(res.data)
-        else:
-            return pd.DataFrame(columns=["id", "name", "category", "budget"])
+    # ---------- 硬编码活动定义（顺序与你原 CSV 一致，已去除尾部空格）----------
+    DEFAULT_ACTIVITIES = [
+        {"name": "Food & Water & Self care", "category": "B", "budget": 330},
+        {"name": "Energy, Focus and Emotion", "category": "B", "budget": 280},
+        {"name": "Basic Exercise", "category": "B", "budget": 365},
+        {"name": "Foot step", "category": "B", "budget": 200},
+        {"name": ">.5hour MAG", "category": "M", "budget": 300},
+        {"name": ">.5hour books", "category": "M", "budget": 300},
+        {"name": "Meditation", "category": "V", "budget": 365},
+        {"name": "Sketch", "category": "V", "budget": 365},
+        {"name": "Life Admin", "category": "V", "budget": 53},
+        {"name": "Learn sth new", "category": "M", "budget": 50},
+        {"name": "Movie", "category": "M", "budget": 54},
+        {"name": "Extra Exercise", "category": "B", "budget": 200},
+        {"name": "Monthly review", "category": "V", "budget": 12},
+        {"name": "Invest", "category": "M", "budget": 12},
+        {"name": "Play/Exhibits/lecture", "category": "M", "budget": 25},
+        {"name": "Meet new people", "category": "E", "budget": 25},
+        {"name": "Deep exposure to nature", "category": "E", "budget": 15},
+        {"name": "Quarterly Review", "category": "V", "budget": 4},
+        {"name": "CV & Jobs", "category": "M", "budget": 6},
+        {"name": "Yearly Review + Plan", "category": "V", "budget": 2},
+        {"name": "Annual leave", "category": "V", "budget": 20},
+        {"name": "Family Gathering", "category": "E", "budget": 20},
+        {"name": "Health Check", "category": "B", "budget": 8},
+        {"name": "Extensive Journey (km)", "category": "B", "budget": 7},
+        {"name": "People", "category": "E", "budget": 300},
+        {"name": "Give back", "category": "V", "budget": 100},
+        {"name": "Engage. Get buy in. Inspire.", "category": "E", "budget": 225},
+        {"name": "Seek for help", "category": "E", "budget": 200},
+        {"name": "Confident & Brave", "category": "E", "budget": 120},
+        {"name": "Storytelling/talkative", "category": "M", "budget": 100},
+        {"name": "AI", "category": "M", "budget": 200},
+        {"name": "Growth Mindset", "category": "V", "budget": 330},
+    ]
 
-    def parse_csv_to_activities_and_history(uploaded_file):
+    # ---------- 初始化活动到 Supabase（仅首次）----------
+    def init_activities_to_db():
+        for act in DEFAULT_ACTIVITIES:
+            supabase.table("activities").upsert({
+                "name": act["name"],
+                "category": act["category"],
+                "budget": act["budget"]
+            }, on_conflict="name").execute()
+
+    # ---------- 解析纯数据 CSV（强制只读前33列）----------
+    def parse_data_csv(uploaded_file):
         content = uploaded_file.read().decode("utf-8-sig")
-        reader = csv.reader(content.splitlines())
-        lines = list(reader)
-        if len(lines) < 4:
-            st.error("CSV must have at least 4 rows (Day header, Category, Activity, Target).")
-            return None, None
+        sniffer = csv.Sniffer()
+        delimiter = sniffer.sniff(content[:1024]).delimiter if content.strip() else ','
+        reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+        rows = list(reader)
 
-        cat_line = lines[1]
-        act_line = lines[2]
-        tgt_line = lines[3] if len(lines) > 3 else []
-
-        activities = []
-        for i in range(1, len(act_line)):
-            cat = cat_line[i].strip() if i < len(cat_line) else ""
-            name = act_line[i].strip() if i < len(act_line) else ""
-            if cat in ("B","V","M","E") and name:
-                budget_str = tgt_line[i].strip() if i < len(tgt_line) else "0"
-                try:
-                    budget = float(budget_str)
-                except:
-                    budget = 0.0
-                activities.append({"name": name, "category": cat, "budget": budget})
-
-        month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
-                     "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+        month_map = {
+            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
+            "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
+            "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        }
         history = []
-        for row in lines[4:]:
-            if not row or len(row) < 2:
+        current_year = date.today().year
+
+        for row in rows:
+            if not row or not row[0].strip():
                 continue
+            row = row[:33]  # 只取前33列（日期 + 32个活动），忽略多余列
             date_str = row[0].strip()
-            if not date_str:
-                continue
             parts = date_str.split()
             if len(parts) != 2:
                 continue
@@ -472,220 +492,275 @@ elif task.startswith("Task 6"):
                 continue
             try:
                 day = int(day_str)
-            except:
+                record_date = date(current_year, month, day)
+            except (ValueError, TypeError):
                 continue
-            record_date = date(date.today().year, month, day)
-            for idx, act in enumerate(activities):
-                col_idx = idx + 1
-                if col_idx < len(row):
-                    val = row[col_idx].strip().upper()
-                    if val == "X":
-                        achieved = 1.0
-                    elif val.replace(".","",1).isdigit():
-                        achieved = float(val)
-                    else:
-                        achieved = 0.0
-                    if achieved > 0:
-                        history.append({
-                            "date": record_date,
-                            "activity_name": act["name"],
-                            "achieved": achieved
-                        })
-        return activities, history
 
-    def init_activities_from_list(act_list):
-        for act in act_list:
-            supabase.table("activities").upsert({
-                "name": act["name"],
-                "category": act["category"],
-                "budget": act["budget"]
-            }, on_conflict="name").execute()
-        st.cache_data.clear()
+            for idx in range(32):
+                col = idx + 1
+                if col >= len(row):
+                    break
+                raw = row[col].strip().upper()
+                if raw in ("X", "1"):
+                    achieved = 1.0
+                elif raw.replace(".", "", 1).isdigit():
+                    achieved = float(raw)
+                else:
+                    continue
+                history.append({
+                    "date": record_date,
+                    "activity_name": DEFAULT_ACTIVITIES[idx]["name"],
+                    "achieved": achieved,
+                })
+        return history
 
-    def import_history(history_list):
-        if not history_list:
+    def import_history(hist_list):
+        if not hist_list:
             return
         res = supabase.table("activities").select("id, name").execute()
         name_to_id = {r["name"]: r["id"] for r in res.data} if res.data else {}
-        for rec in history_list:
-            act_name = rec["activity_name"]
-            if act_name not in name_to_id:
+        records = []
+        for rec in hist_list:
+            act_id = name_to_id.get(rec["activity_name"])
+            if act_id is None:
                 continue
-            act_id = name_to_id[act_name]
-            supabase.table("checkins").upsert({
+            records.append({
                 "checkin_date": rec["date"].isoformat(),
                 "activity_id": act_id,
-                "achieved": rec["achieved"]
-            }, on_conflict="checkin_date, activity_id").execute()
+                "achieved": rec["achieved"],
+            })
+        if not records:
+            return
 
-    df_activities = load_activities_from_db()
-    if df_activities.empty:
-        st.warning("No activities found in database. Please upload your CSV to initialize the tracker.")
-        uploaded = st.file_uploader("Upload activity tracker CSV", type="csv", key="init_upload")
-        if uploaded is not None:
-            acts, hist = parse_csv_to_activities_and_history(uploaded)
-            if acts is None:
-                st.stop()
-            init_activities_from_list(acts)
-            import_history(hist)
-            st.success("Activities and history imported! Refreshing...")
-            st.cache_data.clear()
-            st.rerun()
-        st.stop()
+        BATCH_SIZE = 500
+        total_batches = (len(records) + BATCH_SIZE - 1) // BATCH_SIZE
+        progress = st.progress(0, text="Importing records…")
 
-    activities = []
-    for _, row in df_activities.iterrows():
-        activities.append({
-            "id": row["id"],
-            "name": row["name"],
-            "category": row["category"],
-            "budget": row["budget"]
-        })
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i: i + BATCH_SIZE]
+            supabase.table("checkins").upsert(
+                batch, on_conflict="checkin_date,activity_id"
+            ).execute()
+            pct = min((i + BATCH_SIZE) / len(records), 1.0)
+            batch_num = i // BATCH_SIZE + 1
+            progress.progress(pct, text=f"Importing batch {batch_num}/{total_batches}…")
 
-    # 打卡
+        progress.empty()
+        st.success(f"✅ Imported {len(records)} records in {total_batches} batches.")
+
+    # ---------- 保证活动已初始化 ----------
+    df_act = supabase.table("activities").select("*").order("id").execute()
+    if not df_act.data:
+        init_activities_to_db()
+        st.success("Activities initialised from built‑in list.")
+        st.rerun()
+
+    activities = df_act.data
+
+    # ---------- 每日打卡 ----------
     st.markdown("### 📅 Select Date for Check-in")
-    selected_date = st.date_input("Pick a date", date.today())
-    st.markdown(f"**Activities for {selected_date.strftime('%B %d, %Y')}**")
-    checkin_res = supabase.table("checkins").select("activity_id, achieved").eq("checkin_date", selected_date.isoformat()).execute()
-    day_map = {r["activity_id"]: r["achieved"] for r in checkin_res.data} if checkin_res.data else {}
+    sel_date = st.date_input("Date", date.today())
+    st.markdown(f"**{sel_date.strftime('%B %d, %Y')}**")
 
-    col_cat = {"B": "🟢 Body", "V": "🟣 Value", "M": "🔵 Mental", "E": "🔴 Emotion"}
-    categories = ["B","V","M","E"]
-    updated_entries = {}
-    for cat in categories:
-        st.markdown(f"**{col_cat[cat]}**")
+    checkin = (
+        supabase.table("checkins")
+        .select("activity_id, achieved")
+        .eq("checkin_date", sel_date.isoformat())
+        .execute()
+    )
+    day_map = {r["activity_id"]: r["achieved"] for r in checkin.data} if checkin.data else {}
+
+    updated = {}
+    total = 0
+    cats = {"B": "🟢 Body", "V": "🟣 Value", "M": "🔵 Mental", "E": "🔴 Emotion"}
+
+    for cat, label in cats.items():
         cat_acts = [a for a in activities if a["category"] == cat]
+        if not cat_acts:
+            continue
+        st.markdown(f"**{label}**")
         cols = st.columns(len(cat_acts))
-        for i, act in enumerate(cat_acts):
-            current_val = day_map.get(act["id"], 0)
-            checked = cols[i].checkbox(act["name"], value=(current_val > 0), key=f"{act['id']}_{selected_date}")
-            updated_entries[act["id"]] = 1.0 if checked else 0.0
+        for i, a in enumerate(cat_acts):
+            val = day_map.get(a["id"], 0)
+            checked = cols[i].checkbox(
+                a["name"], value=(val > 0), key=f"{a['id']}_{sel_date}"
+            )
+            updated[a["id"]] = 1.0 if checked else 0.0
+            if checked:
+                total += 1
+
+    st.markdown(f"**✅ Today: {total} / {len(activities)}**")
 
     if st.button("💾 Save Check-in"):
-        for act_id, achieved in updated_entries.items():
-            supabase.table("checkins").delete().eq("checkin_date", selected_date.isoformat()).eq("activity_id", act_id).execute()
-            if achieved > 0:
-                supabase.table("checkins").insert({
-                    "checkin_date": selected_date.isoformat(),
-                    "activity_id": act_id,
-                    "achieved": achieved
-                }).execute()
-        st.success("Check-in saved!")
+        supabase.table("checkins").delete().eq("checkin_date", sel_date.isoformat()).execute()
+        rows_to_insert = [
+            {"checkin_date": sel_date.isoformat(), "activity_id": a_id, "achieved": ach}
+            for a_id, ach in updated.items()
+            if ach > 0
+        ]
+        if rows_to_insert:
+            supabase.table("checkins").insert(rows_to_insert).execute()
+        st.success("Saved!")
         st.rerun()
 
-    # YTD
+    # ---------- YTD 进度（分页查询）----------
     st.markdown("### 📊 Year-to-Date Progress")
+
     year_start = date(date.today().year, 1, 1).isoformat()
     today_iso = date.today().isoformat()
-    res = supabase.table("checkins").select("checkin_date, activity_id, achieved").gte("checkin_date", year_start).lte("checkin_date", today_iso).execute()
-    if res.data:
-        df_checkins = pd.DataFrame(res.data)
-        df_checkins["checkin_date"] = pd.to_datetime(df_checkins["checkin_date"]).dt.date
-        df_full = df_checkins.merge(df_activities, left_on="activity_id", right_on="id")
-        actual = df_full.groupby(["activity_id", "name", "category", "budget"])["achieved"].sum().reset_index()
-    else:
-        actual = pd.DataFrame()
+    dp = min((date.today() - date(date.today().year, 1, 1)).days + 1, 365)
 
-    if not actual.empty:
-        days_passed = (date.today() - date(date.today().year, 1, 1)).days + 1
-        progress_rows = []
-        for _, row in actual.iterrows():
-            budget = row["budget"]
-            achieved = row["achieved"]
-            expected = round(budget * days_passed / 365, 1)
-            ratio = achieved / budget if budget > 0 else 0
-            if achieved >= expected:
-                status = "On Track"
-            elif achieved >= expected * 0.8:
-                status = "Slightly Behind"
-            else:
-                status = "Behind"
-            progress_rows.append({
-                "Category": row["category"],
-                "Activity": row["name"],
-                "Annual Target": int(round(budget)),
-                "Actual YTD": int(round(achieved)),
-                "Expected YTD": int(round(expected)),
-                "Progress %": f"{ratio:.1%}",
-                "Status": status
-            })
-        df_progress = pd.DataFrame(progress_rows)
-
-        def status_color(val):
-            if val == "On Track":
-                return "background-color: #d4edda; color: #155724"
-            elif val == "Slightly Behind":
-                return "background-color: #fff3cd; color: #856404"
-            else:
-                return "background-color: #f8d7da; color: #721c24"
-
-        styled = df_progress.style.map(status_color, subset=["Status"])
-        st.dataframe(styled, use_container_width=True)
-
-        st.markdown("**Category Totals**")
-        cat_summary = []
-        for cat in categories:
-            cat_df = actual[actual["category"] == cat]
-            if not cat_df.empty:
-                total_budget = cat_df["budget"].sum()
-                total_actual = cat_df["achieved"].sum()
-                expected_cat = total_budget * days_passed / 365
-                cat_status = "On Track" if total_actual >= expected_cat else "Behind"
-                cat_summary.append({
-                    "Category": cat,
-                    "Total Target": int(round(total_budget)),
-                    "Actual": int(round(total_actual)),
-                    "Expected": int(round(expected_cat)),
-                    "Progress %": f"{total_actual / total_budget:.1%}" if total_budget > 0 else "0%",
-                    "Status": cat_status
-                })
-        if cat_summary:
-            df_cat = pd.DataFrame(cat_summary)
-            styled_cat = df_cat.style.map(
-                lambda val: "background-color: #d4edda; color: #155724" if val == "On Track" else "background-color: #f8d7da; color: #721c24",
-                subset=["Status"]
+    # FIX: Supabase SELECT 也有 1000 行的默认限制，需要分页
+    def fetch_all_checkins(year_start, today_iso, page_size=1000):
+        all_rows = []
+        offset = 0
+        while True:
+            res = (
+                supabase.table("checkins")
+                .select("activity_id, achieved")
+                .gte("checkin_date", year_start)
+                .lte("checkin_date", today_iso)
+                .range(offset, offset + page_size - 1)
+                .execute()
             )
-            st.dataframe(styled_cat, use_container_width=True)
-    else:
-        st.info("No check-ins this year yet. Start by saving today's activities!")
+            batch = res.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        return all_rows
 
-    # 编辑 Budget
+    ytd_data = fetch_all_checkins(year_start, today_iso)
+
+    achieved_by_id = defaultdict(float)
+    for r in ytd_data:
+        achieved_by_id[r["activity_id"]] += float(r["achieved"])
+
+    prog_rows = []
+    for act in activities:
+        b = float(act["budget"])
+        a = achieved_by_id.get(act["id"], 0.0)
+        ex = round(b * dp / 365, 1)
+        ratio = a / b if b > 0 else 0.0
+        if a >= ex:
+            status = "On Track"
+        elif a >= ex * 0.8:
+            status = "Slightly Behind"
+        else:
+            status = "Behind"
+        prog_rows.append({
+            "Category": act["category"],
+            "Activity": act["name"],
+            "Target": int(round(b)),
+            "Actual": int(round(a)),
+            "Expected": int(round(ex)),
+            "Progress": f"{ratio:.1%}",
+            "Status": status,
+        })
+
+    df_prog = pd.DataFrame(prog_rows)
+
+    def color_status(s):
+        if s == "On Track":
+            return "background-color:#d4edda; color:#155724"
+        if s == "Slightly Behind":
+            return "background-color:#fff3cd; color:#856404"
+        return "background-color:#f8d7da; color:#721c24"
+
+    st.dataframe(
+        df_prog.style.map(color_status, subset=["Status"]),
+        use_container_width=True,
+    )
+
+    # 类别汇总
+    cat_rows = []
+    for cat, _ in cats.items():
+        acts_c = [a for a in activities if a["category"] == cat]
+        tb = sum(float(a["budget"]) for a in acts_c)
+        ta = sum(achieved_by_id.get(a["id"], 0.0) for a in acts_c)
+        ec = tb * dp / 365
+        sts = "On Track" if ta >= ec else "Behind"
+        cat_rows.append({
+            "Category": cat,
+            "Target": int(round(tb)),
+            "Actual": int(round(ta)),
+            "Expected": int(round(ec)),
+            "Progress": f"{ta/tb:.1%}" if tb > 0 else "0%",
+            "Status": sts,
+        })
+
+    df_cat = pd.DataFrame(cat_rows)
+    st.dataframe(
+        df_cat.style.map(
+            lambda s: (
+                "background-color:#d4edda; color:#155724"
+                if s == "On Track"
+                else "background-color:#f8d7da; color:#721c24"
+            ),
+            subset=["Status"],
+        ),
+        use_container_width=True,
+    )
+
+    # ---------- 编辑预算 ----------
     st.markdown("### ✏️ Edit Annual Budget")
-    selected_act = st.selectbox("Select activity to modify:", [a["name"] for a in activities])
-    if selected_act:
-        act = next(a for a in activities if a["name"] == selected_act)
-        new_budget = st.number_input(f"New budget for {selected_act}", value=int(act["budget"]), min_value=0)
+    sel_act_name = st.selectbox("Activity", [a["name"] for a in activities])
+    if sel_act_name:
+        act_sel = next(a for a in activities if a["name"] == sel_act_name)
+        new_b = st.number_input("New Budget", value=int(act_sel["budget"]), min_value=0)
         if st.button("Update Budget"):
-            supabase.table("activities").update({"budget": new_budget}).eq("id", act["id"]).execute()
-            st.success(f"Budget for '{selected_act}' updated to {new_budget}.")
-            st.cache_data.clear()
+            supabase.table("activities").update({"budget": new_b}).eq("id", act_sel["id"]).execute()
+            st.success("Updated!")
             st.rerun()
 
-    # 批量上传历史数据
-    st.markdown("### 📤 Upload CSV to Import / Update History")
-    st.caption("Upload a CSV file with the same format to bulk-import or update past check-ins. (Existing records will be updated, not duplicated.)")
-    uploaded_history = st.file_uploader("Upload CSV", type="csv", key="history_upload")
-    if uploaded_history is not None:
-        acts_parsed, hist_parsed = parse_csv_to_activities_and_history(uploaded_history)
-        if acts_parsed is None:
-            st.stop()
-        init_activities_from_list(acts_parsed)
-        import_history(hist_parsed)
-        st.success("History imported! Refreshing...")
-        st.cache_data.clear()
-        st.rerun()
+    # ---------- 导入历史数据（先清空再导入）----------
+    st.markdown("### 📤 Import History from Data-Only CSV")
+    st.caption("Upload your data CSV (dates in first column, 32 data columns). Previous check-ins will be replaced.")
+    with st.form("reimport"):
+        up_hist = st.file_uploader("Upload Data CSV", type="csv")
+        if st.form_submit_button("Import History") and up_hist is not None:
+            hist = parse_data_csv(up_hist)
+            if hist:
+                # 清空旧记录
+                supabase.table("checkins").delete().neq("id", 0).execute()
+                import_history(hist)
+                st.rerun()
 
-    # 导出
+    # ---------- 导出 ----------
     st.markdown("### 📥 Export Data")
     if st.button("Generate Download Link"):
-        full_res = supabase.table("checkins").select("*").execute()
-        if full_res.data:
-            df_all = pd.DataFrame(full_res.data)
-            df_all = df_all.merge(df_activities[["id", "name"]], left_on="activity_id", right_on="id")
-            pivot = df_all.pivot_table(index="checkin_date", columns="name", values="achieved", aggfunc="sum", fill_value=0)
-            pivot = pivot.reset_index()
-            csv_buffer = io.StringIO()
-            pivot.to_csv(csv_buffer, index=False)
-            st.download_button("Download CSV", csv_buffer.getvalue(), file_name=f"activity_backup_{date.today()}.csv")
+        # 分页获取所有 checkins 记录，避免 1000 行限制
+        all_data = []
+        page_size = 1000
+        offset = 0
+        while True:
+            res = (
+                supabase.table("checkins")
+                .select("*")
+                .range(offset, offset + page_size - 1)
+                .order("checkin_date", desc=False)
+                .execute()
+            )
+            batch = res.data or []
+            all_data.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        if all_data:
+            df_all = pd.DataFrame(all_data)
+            # 合并活动名称
+            df_act = pd.DataFrame(activities)[["id", "name"]]
+            df_all = df_all.merge(df_act, left_on="activity_id", right_on="id")
+            pivot = df_all.pivot_table(
+                index="checkin_date", columns="name",
+                values="achieved", aggfunc="sum", fill_value=0,
+            ).reset_index()
+            buf = io.StringIO()
+            pivot.to_csv(buf, index=False)
+            st.download_button(
+                "Download CSV", buf.getvalue(),
+                file_name=f"backup_{date.today()}.csv",
+            )
         else:
             st.info("No data to export.")
