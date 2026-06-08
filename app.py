@@ -215,15 +215,12 @@ elif task.startswith("Task 2"):
         for region, names in stocks.items():
             for name, ticker in names.items():
                 try:
-                    # 获取最近 5 天的数据，用于计算昨日收盘价和今日最新价
                     df = yf.Ticker(ticker).history(period="5d")
                     if df.empty or len(df) < 2:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
 
-                    # 最新价（今日收盘价或实时价）
                     last_price = df['Close'].iloc[-1]
-                    # 前一交易日收盘价
                     prev_close = df['Close'].iloc[-2]
                     change = (last_price - prev_close) / prev_close * 100
 
@@ -233,7 +230,6 @@ elif task.startswith("Task 2"):
                 except:
                     rows.append((name, "Error", "-", "gray"))
 
-        # 生成表格
         html = "<table style='width:100%; border-collapse: collapse;'>"
         html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
         for name, price, chg, color in rows:
@@ -241,7 +237,6 @@ elif task.startswith("Task 2"):
         html += "</table>"
         st.markdown(html, unsafe_allow_html=True)
 
-        # 当日分时图（左：A股/港股 北京时间，右：美股 纽约时间）
         col_left, col_right = st.columns([1, 1])
         with col_left:
             st.markdown("**🇨🇳 A-Share / HK (Beijing Time)**")
@@ -254,7 +249,6 @@ elif task.startswith("Task 2"):
             plot_intraday("S&P 1500", "^SP1500", "America/New_York")
             plot_intraday("Dow Jones", "^DJI", "America/New_York")
 
-        # 一个月趋势图（同样按对应时区）
         st.markdown("**📅 1-Month Trend**")
         col_trend_left, col_trend_right = st.columns([1, 1])
         with col_trend_left:
