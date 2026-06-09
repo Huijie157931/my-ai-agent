@@ -37,7 +37,7 @@ def safe_tz_convert(df, tz_name):
     return df
 
 def plot_intraday(name, ticker, tz_name):
-    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌）"""
+    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
         # 获取近5日数据以取得前一交易日收盘价
         df_5d = yf.Ticker(ticker).history(period="5d")
@@ -67,13 +67,13 @@ def plot_intraday(name, ticker, tz_name):
             change = (last_price - prev_close) / prev_close * 100
             line_color = "red" if change >= 0 else "green"
 
-        # 时区转换
-        df.index = df.index.tz_localize(None)  # 先移除可能的时区，再统一处理
-        df = safe_tz_convert(df, tz_name)
+        # 关键修复：直接使用原始本地时间，移除所有时区转换
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)   # 剥离时区信息，保留本地时间数值
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M', tz=tz_name))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))   # 直接显示 HH:MM
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
         st.pyplot(fig)
