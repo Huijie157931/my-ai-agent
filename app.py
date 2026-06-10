@@ -39,41 +39,39 @@ def safe_tz_convert(df, tz_name):
 def plot_intraday(name, ticker, tz_name):
     """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
-        # 获取近5日数据以取得前一交易日收盘价
-        df_5d = yf.Ticker(ticker).history(period="5d")
-        if df_5d.empty or len(df_5d) < 2:
-            # 无法获取前收盘，降级为与开盘价比较
-            df = yf.Ticker(ticker).history(period="1d", interval="5m")
-            if df.empty or len(df) < 2:
-                fig, ax = plt.subplots(figsize=(3.5, 1.8))
-                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
-                ax.set_title(f"{name} (Real-Time)", fontsize=8)
-                st.pyplot(fig)
-                return
-            open_price = df['Open'].iloc[0]
-            last_price = df['Close'].iloc[-1]
-            change = (last_price - open_price) / open_price * 100
-            line_color = "red" if change >= 0 else "green"
-        else:
-            prev_close = df_5d['Close'].iloc[-2]  # 前一交易日收盘价
-            df = yf.Ticker(ticker).history(period="1d", interval="5m")
-            if df.empty or len(df) < 2:
-                fig, ax = plt.subplots(figsize=(3.5, 1.8))
-                ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
-                ax.set_title(f"{name} (Real-Time)", fontsize=8)
-                st.pyplot(fig)
-                return
-            last_price = df['Close'].iloc[-1]
+        # 获取一个月日线数据，用于可靠的前收盘价
+        df_1mo = yf.Ticker(ticker).history(period="1mo")
+        prev_close = None
+        if not df_1mo.empty and len(df_1mo) >= 2:
+            prev_close = df_1mo['Close'].iloc[-2]
+
+        # 获取当日分钟数据
+        df = yf.Ticker(ticker).history(period="1d", interval="5m")
+        if df.empty or len(df) < 2:
+            # 数据不足，无法绘制分时图
+            fig, ax = plt.subplots(figsize=(3.5, 1.8))
+            ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
+            ax.set_title(f"{name} (Real-Time)", fontsize=8)
+            st.pyplot(fig)
+            return
+
+        last_price = df['Close'].iloc[-1]
+        if prev_close is not None:
             change = (last_price - prev_close) / prev_close * 100
             line_color = "red" if change >= 0 else "green"
+        else:
+            # 无前收盘价，降级为与开盘价比较
+            open_price = df['Open'].iloc[0]
+            change = (last_price - open_price) / open_price * 100
+            line_color = "red" if change >= 0 else "green"
 
-        # 关键修复：直接使用原始本地时间，移除所有时区转换
+        # 时间轴直接使用原始本地时间（已修复）
         if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)   # 剥离时区信息，保留本地时间数值
+            df.index = df.index.tz_localize(None)
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))   # 直接显示 HH:MM
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         plt.xticks(fontsize=6)
         plt.yticks(fontsize=6)
         st.pyplot(fig)
@@ -235,23 +233,28 @@ elif task.startswith("Task 2"):
         for region, names in stocks.items():
             for name, ticker in names.items():
                 try:
-                    # 获取最近 5 天的数据，用于计算昨日收盘价和今日最新价
-                    df = yf.Ticker(ticker).history(period="5d")
-                    if df.empty or len(df) < 2:
+                    # 使用一个月日线数据获取最新价和前收盘价（避免周末/节假日干扰）
+                    df_1mo = yf.Ticker(ticker).history(period="1mo")
+                    if df_1mo.empty or len(df_1mo) < 2:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
 
-                    # 最新价（今日收盘价或实时价）
-                    last_price = df['Close'].iloc[-1]
-                    # 前一交易日收盘价
-                    prev_close = df['Close'].iloc[-2]
+                    # 尝试获取当日实时分钟数据
+                    df_intra = yf.Ticker(ticker).history(period="1d", interval="5m")
+                    if not df_intra.empty:
+                        last_price = df_intra['Close'].iloc[-1]
+                    else:
+                        # 未开盘（如美股盘前），使用最近一个交易日的收盘价
+                        last_price = df_1mo['Close'].iloc[-1]
+
+                    prev_close = df_1mo['Close'].iloc[-2]
                     change = (last_price - prev_close) / prev_close * 100
 
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
                 except:
-                    rows.append((name, "Error", "-", "gray"))
+                    rows.append((name, "Error", "-", "gray"))        
 
         # 生成表格
         html = "<table style='width:100%; border-collapse: collapse;'>"
