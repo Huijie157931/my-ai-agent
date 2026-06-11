@@ -37,11 +37,9 @@ def safe_tz_convert(df, tz_name):
     return df
 
 def plot_intraday(name, ticker, tz_name):
-    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
         t = yf.Ticker(ticker)
         
-        # 5天日线，去掉非交易日，确保前收盘价准确
         df_daily = t.history(period="5d", interval="1d").dropna(subset=["Close"])
         prev_close = df_daily["Close"].iloc[-2] if len(df_daily) >= 2 else None
 
@@ -230,28 +228,35 @@ elif task.startswith("Task 2"):
                 try:
                     t = yf.Ticker(ticker)
                     
-                    # 5天日线数据，去掉非交易日，获取可靠的前收盘价
-                    df_daily = t.history(period="5d", interval="1d").dropna(subset=["Close"])
+                    # Fetch 5 days of daily data to reliably get prev_close
+                    # (handles weekends/holidays where there may be gaps)
+                    df_daily = t.history(period="5d", interval="1d")
+                    df_daily = df_daily.dropna(subset=["Close"])
+                    
                     if len(df_daily) < 2:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
-                    prev_close = df_daily["Close"].iloc[-2]
                     
-                    # 1分钟盘中数据，获取最新价（即使市场关闭也能拿到当天收盘价）
-                    df_intra = t.history(period="1d", interval="1m")
+                    prev_close = df_daily["Close"].iloc[-2]  # confirmed previous trading day
+                    
+                    # Get live intraday data for today's last price
+                    df_intra = t.history(period="1d", interval="1m")  # 1m for freshest tick
                     df_intra = df_intra.dropna(subset=["Close"])
+                    
                     if not df_intra.empty:
                         last_price = df_intra["Close"].iloc[-1]
                     else:
-                        # 降级：使用日线的最后一条作为最新价
+                        # Market closed — use today's daily close
                         last_price = df_daily["Close"].iloc[-1]
+                        prev_close = df_daily["Close"].iloc[-2]
 
                     change = (last_price - prev_close) / prev_close * 100
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
-                except:
-                    rows.append((name, "Error", "-", "gray"))
+
+                except Exception as e:
+                    rows.append((name, "Error", f"{e}", "gray"))
                
 
         # 生成表格
