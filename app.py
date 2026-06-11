@@ -40,7 +40,7 @@ def plot_intraday(name, ticker, tz_name):
     """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
         t = yf.Ticker(ticker)
-        # 稳健获取前收盘价（优先 fast_info，否则过滤历史数据）
+        # 获取前收盘价（优先 fast_info，否则过滤历史数据）
         try:
             prev_close = t.fast_info.previous_close
         except:
@@ -54,14 +54,27 @@ def plot_intraday(name, ticker, tz_name):
                     past = df_hist[df_hist.index.normalize().date < today]
                 else:
                     past = df_hist[df_hist.index.tz_convert("UTC").normalize().date < today]
-                if not past.empty:
-                    prev_close = past["Close"].iloc[-1]
-                else:
-                    prev_close = df_hist["Close"].iloc[-2]
+                prev_close = past["Close"].iloc[-1] if not past.empty else df_hist["Close"].iloc[-2]
 
-        # 获取当日分钟数据
-        df = t.history(period="1d", interval="5m", prepost=True)
-        if df.empty or len(df) < 2:
+        # 获取最近两个自然日内的分钟数据，确保收盘后也能获得当天完整曲线
+        df = t.history(period="2d", interval="5m").dropna(subset=["Close"])
+        if df.empty:
+            fig, ax = plt.subplots(figsize=(3.5, 1.8))
+            ax.text(0.5, 0.5, 'No data available', ha='center', va='center', fontsize=8)
+            ax.set_title(f"{name} (Real-Time)", fontsize=8)
+            st.pyplot(fig)
+            return
+
+        # 转换为交易所本地时区，再截取最近一个交易日的数据
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert(tz_name)
+        else:
+            df.index = df.index.tz_localize("UTC").tz_convert(tz_name)
+
+        last_date = df.index.normalize().max()
+        df = df[df.index.normalize() == last_date]
+
+        if len(df) < 2:
             fig, ax = plt.subplots(figsize=(3.5, 1.8))
             ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
             ax.set_title(f"{name} (Real-Time)", fontsize=8)
@@ -72,24 +85,25 @@ def plot_intraday(name, ticker, tz_name):
         if prev_close and prev_close > 0:
             change = (last_price - prev_close) / prev_close * 100
         else:
-            # 无前收盘价，降级为与开盘价比较
             change = (last_price - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100
 
         line_color = "red" if change >= 0 else "green"
 
-        # 时间轴直接使用原始本地时间
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
+        # 去除时区信息，以便 matplotlib 显示本地时间
+        df.index = df.index.tz_localize(None)
+
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
         ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        plt.xticks(fontsize=6)
+        plt.xticks(fontsize=6, rotation=30)
         plt.yticks(fontsize=6)
+        plt.tight_layout()
         st.pyplot(fig)
-    except Exception:
+
+    except Exception as e:
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
-        ax.text(0.5, 0.5, 'Error loading data', ha='center', va='center', fontsize=8)
+        ax.text(0.5, 0.5, f'Error: {str(e)[:30]}', ha='center', va='center', fontsize=7)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
         st.pyplot(fig)
 
