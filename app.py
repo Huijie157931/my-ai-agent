@@ -37,6 +37,7 @@ def safe_tz_convert(df, tz_name):
     return df
 
 def plot_intraday(name, ticker, tz_name):
+    """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
         t = yf.Ticker(ticker)
         # 稳健获取前收盘价（优先 fast_info，否则过滤历史数据）
@@ -56,9 +57,9 @@ def plot_intraday(name, ticker, tz_name):
                 if not past.empty:
                     prev_close = past["Close"].iloc[-1]
                 else:
-                    prev_close = df_hist["Close"].iloc[-2]                
-       
+                    prev_close = df_hist["Close"].iloc[-2]
 
+        # 获取当日分钟数据
         df = t.history(period="1d", interval="5m")
         if df.empty or len(df) < 2:
             fig, ax = plt.subplots(figsize=(3.5, 1.8))
@@ -67,18 +68,20 @@ def plot_intraday(name, ticker, tz_name):
             st.pyplot(fig)
             return
 
-        last_price = df["Close"].iloc[-1]
+        last_price = df['Close'].iloc[-1]
         if prev_close and prev_close > 0:
             change = (last_price - prev_close) / prev_close * 100
         else:
-            change = (last_price - df["Open"].iloc[0]) / df["Open"].iloc[0] * 100
+            # 无前收盘价，降级为与开盘价比较
+            change = (last_price - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100
 
         line_color = "red" if change >= 0 else "green"
+
+        # 时间轴直接使用原始本地时间
         if df.index.tz is not None:
             df.index = df.index.tz_localize(None)
-
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
-        ax.plot(df.index, df["Close"], color=line_color, linewidth=1)
+        ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         plt.xticks(fontsize=6)
@@ -238,8 +241,6 @@ elif task.startswith("Task 2"):
     }
 
     if st.button("Fetch Real-time Data"):
-  
-               
         # 稳健获取最新价和前收盘价的辅助函数
         def get_price_and_change(ticker):
             t = yf.Ticker(ticker)
@@ -293,9 +294,9 @@ elif task.startswith("Task 2"):
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
-                except Exception as e:
-                    rows.append((name, "Error", str(e), "gray"))
-                    
+                except:
+                    rows.append((name, "Error", "-", "gray"))
+
         # 生成表格
         html = "<table style='width:100%; border-collapse: collapse;'>"
         html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
@@ -304,7 +305,7 @@ elif task.startswith("Task 2"):
         html += "</table>"
         st.markdown(html, unsafe_allow_html=True)
 
-        # 当日分时图（左：A股/港股 北京时间，右：美股 纽约时间）
+        # 当日分时图 (左: A股/港股 北京时间，右: 美股 纽约时间)
         col_left, col_right = st.columns([1, 1])
         with col_left:
             st.markdown("**🇨🇳 A-Share / HK (Beijing Time)**")
@@ -317,7 +318,7 @@ elif task.startswith("Task 2"):
             plot_intraday("S&P 1500", "^SP1500", "America/New_York")
             plot_intraday("Dow Jones", "^DJI", "America/New_York")
 
-        # 一个月趋势图（同样按对应时区）
+        # 一个月趋势图 (同样按对应时区)
         st.markdown("**📅 1-Month Trend**")
         col_trend_left, col_trend_right = st.columns([1, 1])
         with col_trend_left:
