@@ -226,7 +226,7 @@ elif task.startswith("Task 2"):
             for name, ticker in names.items():
                 try:
                     t = yf.Ticker(ticker)
-                    fi = t.fast_info
+                    fi = t.fast_info  # lightweight, always fresh, no caching issues
 
                     last_price = fi.last_price
                     prev_close = fi.previous_close
@@ -239,8 +239,9 @@ elif task.startswith("Task 2"):
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
-                except:
-                    rows.append((name, "Error", "-", "gray"))       
+
+                except Exception as e:
+                    rows.append((name, "Error", str(e), "gray"))    
                
 
         # 生成表格
