@@ -39,7 +39,24 @@ def safe_tz_convert(df, tz_name):
 def plot_intraday(name, ticker, tz_name):
     try:
         t = yf.Ticker(ticker)
-        prev_close = t.fast_info.previous_close        
+        # 稳健获取前收盘价（优先 fast_info，否则过滤历史数据）
+        try:
+            prev_close = t.fast_info.previous_close
+        except:
+            prev_close = None
+
+        if not prev_close:
+            df_hist = t.history(period="5d", interval="1d").dropna(subset=["Close"])
+            if len(df_hist) >= 2:
+                today = pd.Timestamp.now(tz="UTC").date()
+                if df_hist.index.tz is None:
+                    past = df_hist[df_hist.index.normalize().date < today]
+                else:
+                    past = df_hist[df_hist.index.tz_convert("UTC").normalize().date < today]
+                if not past.empty:
+                    prev_close = past["Close"].iloc[-1]
+                else:
+                    prev_close = df_hist["Close"].iloc[-2]                
        
 
         df = t.history(period="1d", interval="5m")
@@ -221,17 +238,54 @@ elif task.startswith("Task 2"):
     }
 
     if st.button("Fetch Real-time Data"):
+  
+               
+        # 稳健获取最新价和前收盘价的辅助函数
+        def get_price_and_change(ticker):
+            t = yf.Ticker(ticker)
+            last_price = prev_close = None
+
+            # 1) 尝试 fast_info
+            try:
+                fi = t.fast_info
+                last_price = fi.last_price
+                prev_close = fi.previous_close
+                if last_price and prev_close:
+                    return last_price, prev_close
+            except:
+                pass
+
+            # 2) 回退：使用历史数据，过滤出今天之前的 bars 来获取昨日收盘价
+            df = t.history(period="5d", interval="1d").dropna(subset=["Close"])
+            if len(df) < 2:
+                return None, None
+
+            today = pd.Timestamp.now(tz="UTC").date()
+            if df.index.tz is None:
+                past = df[df.index.normalize().date < today]
+            else:
+                past = df[df.index.tz_convert("UTC").normalize().date < today]
+
+            if not past.empty:
+                prev_close = past["Close"].iloc[-1]
+            else:
+                prev_close = df["Close"].iloc[-2]
+
+            # 最新价：优先用当日分钟数据，否则用日线最后一条
+            df_intra = t.history(period="1d", interval="1m").dropna(subset=["Close"])
+            if not df_intra.empty:
+                last_price = df_intra["Close"].iloc[-1]
+            else:
+                last_price = df["Close"].iloc[-1]
+
+            return last_price, prev_close
+
         rows = []
         for region, names in stocks.items():
             for name, ticker in names.items():
                 try:
-                    t = yf.Ticker(ticker)
-                    fi = t.fast_info  # lightweight, always fresh, no caching issues
-
-                    last_price = fi.last_price
-                    prev_close = fi.previous_close
-
-                    if not prev_close or not last_price:
+                    last_price, prev_close = get_price_and_change(ticker)
+                    if not last_price or not prev_close:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
 
@@ -239,11 +293,9 @@ elif task.startswith("Task 2"):
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
-
                 except Exception as e:
-                    rows.append((name, "Error", str(e), "gray"))    
-               
-
+                    rows.append((name, "Error", str(e), "gray"))
+                    
         # 生成表格
         html = "<table style='width:100%; border-collapse: collapse;'>"
         html += "<tr><th>Index</th><th>Last Price</th><th>Change</th></tr>"
