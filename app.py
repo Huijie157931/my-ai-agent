@@ -60,7 +60,7 @@ def plot_intraday(name, ticker, tz_name):
                     prev_close = df_hist["Close"].iloc[-2]
 
         # 获取当日分钟数据
-        df = t.history(period="1d", interval="5m")
+        df = t.history(period="1d", interval="5m", prepost=True)
         if df.empty or len(df) < 2:
             fig, ax = plt.subplots(figsize=(3.5, 1.8))
             ax.text(0.5, 0.5, 'Not enough intraday data', ha='center', va='center', fontsize=8)
