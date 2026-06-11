@@ -39,9 +39,8 @@ def safe_tz_convert(df, tz_name):
 def plot_intraday(name, ticker, tz_name):
     try:
         t = yf.Ticker(ticker)
-        
-        df_daily = t.history(period="5d", interval="1d").dropna(subset=["Close"])
-        prev_close = df_daily["Close"].iloc[-2] if len(df_daily) >= 2 else None
+        prev_close = t.fast_info.previous_close        
+       
 
         df = t.history(period="1d", interval="5m")
         if df.empty or len(df) < 2:
@@ -227,36 +226,21 @@ elif task.startswith("Task 2"):
             for name, ticker in names.items():
                 try:
                     t = yf.Ticker(ticker)
-                    
-                    # Fetch 5 days of daily data to reliably get prev_close
-                    # (handles weekends/holidays where there may be gaps)
-                    df_daily = t.history(period="5d", interval="1d")
-                    df_daily = df_daily.dropna(subset=["Close"])
-                    
-                    if len(df_daily) < 2:
+                    fi = t.fast_info
+
+                    last_price = fi.last_price
+                    prev_close = fi.previous_close
+
+                    if not prev_close or not last_price:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
-                    
-                    prev_close = df_daily["Close"].iloc[-2]  # confirmed previous trading day
-                    
-                    # Get live intraday data for today's last price
-                    df_intra = t.history(period="1d", interval="1m")  # 1m for freshest tick
-                    df_intra = df_intra.dropna(subset=["Close"])
-                    
-                    if not df_intra.empty:
-                        last_price = df_intra["Close"].iloc[-1]
-                    else:
-                        # Market closed — use today's daily close
-                        last_price = df_daily["Close"].iloc[-1]
-                        prev_close = df_daily["Close"].iloc[-2]
 
                     change = (last_price - prev_close) / prev_close * 100
                     sign = "+" if change >= 0 else ""
                     color = "red" if change >= 0 else "green"
                     rows.append((name, f"{last_price:.2f}", f"{sign}{change:.2f}%", color))
-
-                except Exception as e:
-                    rows.append((name, "Error", f"{e}", "gray"))
+                except:
+                    rows.append((name, "Error", "-", "gray"))       
                
 
         # 生成表格
