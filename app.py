@@ -40,8 +40,10 @@ def plot_intraday(name, ticker, tz_name):
     """绘制当日分时图，颜色基于前收盘价比较（红涨绿跌），时间轴为交易所本地时间"""
     try:
         t = yf.Ticker(ticker)
-        info = t.info
-        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+        
+        # 5天日线，去掉非交易日，确保前收盘价准确
+        df_daily = t.history(period="5d", interval="1d").dropna(subset=["Close"])
+        prev_close = df_daily["Close"].iloc[-2] if len(df_daily) >= 2 else None
 
         df = t.history(period="1d", interval="5m")
         if df.empty or len(df) < 2:
@@ -51,20 +53,18 @@ def plot_intraday(name, ticker, tz_name):
             st.pyplot(fig)
             return
 
-        last_price = df['Close'].iloc[-1]
+        last_price = df["Close"].iloc[-1]
         if prev_close and prev_close > 0:
             change = (last_price - prev_close) / prev_close * 100
         else:
-            # 无前收盘价，降级为与开盘价比较
-            change = (last_price - df['Open'].iloc[0]) / df['Open'].iloc[0] * 100
+            change = (last_price - df["Open"].iloc[0]) / df["Open"].iloc[0] * 100
 
         line_color = "red" if change >= 0 else "green"
-
-        # 时间轴直接使用原始本地时间
         if df.index.tz is not None:
             df.index = df.index.tz_localize(None)
+
         fig, ax = plt.subplots(figsize=(3.5, 1.8))
-        ax.plot(df.index, df['Close'], color=line_color, linewidth=1)
+        ax.plot(df.index, df["Close"], color=line_color, linewidth=1)
         ax.set_title(f"{name} (Real-Time)", fontsize=8)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         plt.xticks(fontsize=6)
@@ -229,18 +229,22 @@ elif task.startswith("Task 2"):
             for name, ticker in names.items():
                 try:
                     t = yf.Ticker(ticker)
-                    info = t.info
-
-                    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
-                    last_price = (
-                        info.get("currentPrice")
-                        or info.get("regularMarketPrice")
-                        or info.get("regularMarketOpen")
-                    )
-
-                    if not prev_close or not last_price:
+                    
+                    # 5天日线数据，去掉非交易日，获取可靠的前收盘价
+                    df_daily = t.history(period="5d", interval="1d").dropna(subset=["Close"])
+                    if len(df_daily) < 2:
                         rows.append((name, "N/A", "-", "gray"))
                         continue
+                    prev_close = df_daily["Close"].iloc[-2]
+                    
+                    # 1分钟盘中数据，获取最新价（即使市场关闭也能拿到当天收盘价）
+                    df_intra = t.history(period="1d", interval="1m")
+                    df_intra = df_intra.dropna(subset=["Close"])
+                    if not df_intra.empty:
+                        last_price = df_intra["Close"].iloc[-1]
+                    else:
+                        # 降级：使用日线的最后一条作为最新价
+                        last_price = df_daily["Close"].iloc[-1]
 
                     change = (last_price - prev_close) / prev_close * 100
                     sign = "+" if change >= 0 else ""
